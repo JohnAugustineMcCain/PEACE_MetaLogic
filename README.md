@@ -1,9 +1,18 @@
 # PEACE MetaLogic
 An attempt to synthesize the Cognitive Science insights of Paul Jorion with the independent research of John McCain
 
+## Mission Statement
+
+PEACE is not just another retrieval or document analyzer.  
+It is an **epistemic engine**: a system that treats knowledge as a living process.  
+Instead of stopping at “answers,” it models how knowing itself unfolds — through tension, paradox, clarification, and eventual collapse into truth, falsehood, or ambiguity.  
+
+The goal is to explore how machines can **reason about their own reasoning**, tracking confidence, novelty, and context completeness as first-class citizens.  
+This project is both a working prototype and a research experiment: part logic engine, part cognitive model, and part invitation to re-imagine what it means for AI to *know*.
+
 ## First toy prototype (untested)
 
-## Features
+### Features
 
 1. **Pluggable LLM adapters with ready-to-fill skeletons**
    - `llm_adapters.py` includes:
@@ -21,7 +30,7 @@ An attempt to synthesize the Cognitive Science insights of Paul Jorion with the 
 
 ---
 
-## Files
+### Files
 
 - `peace_c.py`
 - `llm_adapters.py`
@@ -30,14 +39,14 @@ An attempt to synthesize the Cognitive Science insights of Paul Jorion with the 
 
 ---
 
-## Run the retrieval demo
+### Run the retrieval demo
 
 ```bash
 python3 demo_with_retrieval.py
 
 ```
 
-## Use a real LLM
+### Use a real LLM
 
 In demo_with_retrieval.py, swap the import:
 
