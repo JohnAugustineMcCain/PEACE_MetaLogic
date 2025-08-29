@@ -148,3 +148,32 @@ Engine.liminal_expand(...) now:
 
 4. **Formal bridge**  
    Export a proof sketch when a collapse occurs: assumptions used, rules applied, and evidence edges. This gives you an interpretable artifact.
+
+## sm_peace_oracle.py
+
+`sm_peace_oracle.py` is a **PEACE-C–compatible self-modifying oracle**.  
+It combines your SQLite-backed provenance, safety/math perspectives, and problem classes with the PEACE-C engine (liminal expansion, context completeness, and trivalent truth).
+
+### What it does
+- **Runs the PEACE-C engine** on natural-language claims (`T/F/B` with context completeness `Cc` and a liminal expansion loop).
+- **Logs provenance to SQLite** (`peace_cache.db`): claims, prompts, retrieval hits, verdicts, confidences, timestamps.
+- **Evaluates code modifications** via **safety** / **mathematical soundness** / **category error** perspectives.
+- **Solves math problems** with your existing `MathematicalProblem` flow, plus meta-logical analysis when direct solutions aren’t feasible.
+
+### Truth mapping
+- `TruthValue.T` ↔ `TV.TRUE`  
+- `TruthValue.F` ↔ `TV.FALSE`  
+- `TruthValue.B` ↔ `TV.BOTH`  
+- `TV.UNKNOWN` is treated as **hold** → `TruthValue.B` (keeps paraconsistent safety; avoids explosion).
+
+### File relationships
+- Depends on your PEACE-C core (`peace_c.py`) for:
+  - `Engine`, `EngineConfig`, `CcEstimator`, `Oracle`, `Context`, `TruthValue`
+  - perspectives: `empirical_pattern_perspective()`, `pragmatic_context_perspective()`
+- Optional: `retrieval.py` (tiny bag-of-words retriever)
+- Optional: `llm_adapters.py` (e.g., `MockLLM`, OpenAI/Anthropic skeletons)
+
+### Quickstart
+```bash
+# run the demo
+python3 sm_peace_oracle.py
