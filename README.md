@@ -1,7 +1,7 @@
 # PEACE MetaLogic
 An attempt to synthesize the Cognitive Science insights of Paul Jorion with the independent research of John McCain
 
-## First prototype instructions (untested)
+## First toy prototype (untested)
 
 ## Features
 
