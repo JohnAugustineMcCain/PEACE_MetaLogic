@@ -84,8 +84,58 @@ Engine.liminal_expand(...) now:
 
 - raises Cc until the threshold is met and then collapses.
 
-To be used with a:
+## Future directions
 
-- a JSONL run-logger,
+*These are not current features. This is about trying to predict the direction this work is heading*
 
-- a “policy” hook that decides actions from (TruthValue, confidence, context)
+### Near-term improvements
+1. **Add JSONL tracing**  
+   Each tick writes claim, questions, chosen answers, retrieval hits, LLM prompts, raw completions, verdict, Cc, novelty, and time. This gives you reproducibility and error analysis.
+
+2. **Add a policy module**  
+   Map (truth value, confidence, Cc) to actions such as continue searching, escalate, or decide. Make thresholds configurable in code.
+
+3. **Add perspective plugins**  
+   - *Causal mechanism*: require a minimal causal chain before `T`.  
+   - *Source trust*: weight evidence by source reliability.  
+   - *Temporal consistency*: penalize contradictions across time.  
+   - *Pragmatics*: detect irony or hedges and hold `B` unless clarified.
+
+4. **Integrate an embedding retriever**  
+   Replace the bag-of-words retriever with a vector index. Keep the same interface so your engine code does not change.
+
+5. **Calibrate confidence**  
+   Create a small benchmark of claims with known outcomes. Run the engine and compute calibration curves for confidence vs accuracy. Adjust thresholds to minimize over-confidence.
+
+---
+
+### Medium steps that raise the ceiling
+1. **Active questioning**  
+   Train a small scorer that ranks clarifying questions by expected Cc gain using past logs. This makes the liminal loop smarter.
+
+2. **Pattern oracle with justification**  
+   Require the LLM to return a verdict, a probability, and three minimal supporting sentences with citations. Store each citation in the trace.
+
+3. **Partial collapses**  
+   Allow a claim to collapse to `T` or `F` inside one perspective while remaining `B` globally. Show users both the local and the global view.
+
+4. **Multi-turn memory**  
+   Persist context across related claims. Let Cc and evidence accumulate so later decisions get faster and crisper.
+
+5. **Safety rails**  
+   Add checks for hallucination, circular citation, and stale evidence. If detected, force `B` and trigger targeted questions.
+
+---
+
+### Ambitious extensions that fit the vision
+1. **Meta-cognitive controller**  
+   A small bandit or RL policy chooses among search actions: retrieve, ask, reframe the claim, switch perspective, or collapse. Reward is a mix of accuracy, cost, and latency.
+
+2. **Human-in-the-loop**  
+   When `B` persists, generate the smallest set of yes/no questions for a human. Update Cc and re-decide. This showcases PEACE as a real assistant.
+
+3. **Cross-modal context**  
+   Add channels for tables, figures, or audio transcripts. The same liminal loop runs, only with different monitors.
+
+4. **Formal bridge**  
+   Export a proof sketch when a collapse occurs: assumptions used, rules applied, and evidence edges. This gives you an interpretable artifact.
