@@ -10,7 +10,9 @@ An attempt to synthesize the Cognitive Science insights of Paul Jorion with the 
 
 Paul Jorion's blog:
 
-John McCain's PEACE work:
+https://www.pauljorion.com/blog_en/
+
+John McCain's PEACE ideas: 
 
 Nicolas Wallner's candidate for a theory of everything:
 
