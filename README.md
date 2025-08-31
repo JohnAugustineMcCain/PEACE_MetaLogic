@@ -12,9 +12,13 @@ Paul Jorion's blog:
 
 https://www.pauljorion.com/blog_en/
 
-John McCain's PEACE ideas: 
+John McCain's PEACE idea: 
 
-Nicolas Wallner's candidate for a theory of everything:
+[📄 PEACE: Paraconsistent Epistemic And Contextual Evaluation](./PEACE__Paraconsistent_Epistemic_And_Contextual_Evaluation.pdf)
+
+Nicolas Wallner's candidate for a Theory of Everything (currently only available in German):
+
+[📄 Theory of Everything](./ToE.pdf)
 
 ## Mission Statement
 
