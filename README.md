@@ -16,7 +16,8 @@ Nicolas Wallner's candidate for a theory of everything:
 
 ## Mission Statement
 
-PEACE is not just another retrieval or document analyzer.  
+PEACE is not just a single application or idea.
+
 It is an **epistemic engine**: a system that treats knowledge as a living process.  
 Instead of stopping at “answers,” it models how knowing itself unfolds — through tension, paradox, clarification, and eventual collapse into truth, falsehood, or ambiguity.  
 
