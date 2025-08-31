@@ -1,3 +1,10 @@
+This work is licensed under the Creative Commons Attribution-NonCommercial 4.0 International License (CC BY-NC 4.0).
+
+Attribution Requirement:
+If you use, adapt, or build upon this work, you must attribute it to:
+
+   John A. McCain
+
 # PEACE MetaLogic
 An attempt to synthesize the Cognitive Science insights of Paul Jorion with the independent research of John McCain
 
