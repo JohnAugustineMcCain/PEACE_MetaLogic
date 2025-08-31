@@ -86,7 +86,7 @@ engine.retriever = retriever
 
 ## What's the meaning of this?
 
-The point is to make an LLM into a Meta-logical reasoning machine that can look at a document and generate summarized information about it while asking itself questions to remainin epistemically consistent, making "safe" decisions based upon what can he determined to be true rather than blindly accepting information to tie into probabilistic generation.
+The point is to make an LLM into a Meta-logical reasoning machine that can look at a document and generate summarized information about it while asking itself questions to remain epistemically consistent, making "safe" decisions based upon what can be determined to be true rather than blindly accepting information to tie into probabilistic generation.
 
 Whether or not this is actually feasable is yet to be tested. If it works, it could be an important step in creating systems that genuinely think and can reason philosophically. I dont have the resources or expertise to do this on my own.
 
