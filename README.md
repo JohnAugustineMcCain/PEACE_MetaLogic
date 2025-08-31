@@ -20,14 +20,30 @@ Nicolas Wallner's candidate for a Theory of Everything (currently only available
 
 [📄 Theory of Everything](./ToE.pdf)
 
+Human understanding is not reducible to logic and reasoning alone. Rather, it arises from a plural toolkit of epistemic instruments:
+
+	•	Formal systems: logic, mathematics, computation.
+ 
+	•	Empirical methods: experiment, measurement, scientific inference.
+ 
+	•	Heuristic cognition: memory, intuition, pattern-recognition.
+ 
+	•	Affective and aesthetic faculties: emotion, value, art, culture.
+ 
+	•	Normative frameworks: philosophy, ethics, metaphysics.
+
+Each of these contributes partial, sometimes inconsistent, but indispensable information.
+
+PEACE Logic functions as a meta-framework to coordinate these instruments without forcing premature closure. This allows both truth (T), falsity (F), and undecided/both (B) to coexist until reality (verification) resolves them.
+
 ## Mission Statement
 
-PEACE is not just a single application or idea.
+PEACE in the future is an **epistemic engine**: a system that treats knowledge as a living process.
 
-It is an **epistemic engine**: a system that treats knowledge as a living process.  
 Instead of stopping at “answers,” it models how knowing itself unfolds — through tension, paradox, clarification, and eventual collapse into truth, falsehood, or ambiguity.  
 
-The goal is to explore how machines can **reason about their own reasoning**, tracking confidence, novelty, and context completeness as first-class citizens.  
+The goal is to explore how machines can **reason about their own reasoning**, tracking confidence, novelty, and epistemic context completeness as priorities.
+
 This project is both a working prototype and a research experiment: part logic engine, part cognitive model, and part invitation to re-imagine what it means for AI to *know*.
 
 ## First toy prototype (untested)
