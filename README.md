@@ -191,6 +191,9 @@ python3 sm_peace_oracle.py
 A meta-logical framework for reasoning about “unsolved” mathematical conjectures  
 (Collatz, Goldbach, RH, etc.) when classical proof is computationally impossible.
 
+
+[Pseudocode](./pseudocode_instruction.py)
+
 ---
 
 ## How You Specialize It
