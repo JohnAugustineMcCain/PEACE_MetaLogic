@@ -184,3 +184,61 @@ It combines your SQLite-backed provenance, safety/math perspectives, and problem
 ```bash
 # run the demo
 python3 sm_peace_oracle.py
+```
+
+# PEACE Logic Oracle
+
+A meta-logical framework for reasoning about “unsolved” mathematical conjectures  
+(Collatz, Goldbach, RH, etc.) when classical proof is computationally impossible.
+
+---
+
+## How You Specialize It
+
+### A) Collatz
+- **run_probe**: pick random large odd `n`, iterate accelerated odd→odd map;  
+  `y=1` if trajectory dips below threshold `T` within step budget.  
+  Witness = `(n, steps, min_odd)`.  
+- **is_counterexample**: a discovered nontrivial cycle or certified divergence.  
+- **bucket_key**: `(n mod small_primes, bitlength band)`.  
+- **heuristics**: drift-based success probability `p ≈ sigm(a − b·log n)`;  
+  lag-1 valuation correlations `k=v2(3n+1)`; ensemble variants.
+
+### B) Goldbach
+- **run_probe**: for sampled even `N`, scan fixed subtractor primes;  
+  `y=1` if ≥1 decomp found.  
+  Witness = first `(p,q)`.  
+- **is_counterexample**: only if exhaustive up to declared bound proves none exists.  
+- **bucket_key**: `(N mod 3,5,7)`; magnitude band.  
+- **heuristics**: Hardy–Littlewood style expected reps → small-budget success prob.
+
+### C) Riemann Hypothesis
+- **run_probe**: choose envelope test (θ(x)−x, π(x)−li(x), Mertens M(n));  
+  `y=1` if all grid points satisfy bound.  
+  Witness = interval + constants.  
+- **is_counterexample**: certified envelope violation or explicit zero off the line.  
+- **bucket_key**: scale band + residue classes if relevant.  
+- **heuristics**: asymptotic error models / random-matrix-theory inspired probabilities.
+
+---
+
+## Philosophy Baked Into the Algorithm
+- **Trivalent truth**: `B` is first-class; it covers undecided/unknown/inconsistent  
+  without forcing fake certainty.  
+- **Verification asymmetry**: one honest counterexample ends the game (`F`).  
+- **Calibration over confidence**: forecasts must be *well-calibrated* (PIT), not just high.  
+- **Earned confidence**: grows only when likelihood, PIT, and CI all agree — preventing  
+  “artificial confidence.”  
+- **Ambient context**: adapters begin with clarifying questions so the surface/assumptions  
+  are explicit before symbol manipulation.
+
+---
+
+## “Copy-Paste and Go” Guidance
+- Keep the pseudocode skeleton unchanged.  
+- For a new conjecture, implement a **DomainAdapter** with:  
+  - 3–5 practical probes,  
+  - a refuter detector for honest `F`,  
+  - 2–4 simple heuristics returning `p ∈ [0,1]`,  
+  - a sensible bucket key for stability.  
+- Everything else (calibration, PIT, earned confidence, verdicting) stays the same.
