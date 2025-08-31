@@ -3,7 +3,7 @@ This work is licensed under the Creative Commons Attribution-NonCommercial 4.0 I
 Attribution Requirement:
 If you use, adapt, or build upon this work, you must attribute it to:
 
-   John A. McCain
+   Paul Jorion, John A. McCain, and Nicolas Wallner
 
 # PEACE MetaLogic
 An attempt to synthesize the Cognitive Science insights of Paul Jorion with the independent research of John McCain and Nicolas Wallner
