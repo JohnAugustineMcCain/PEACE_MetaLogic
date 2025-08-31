@@ -6,7 +6,13 @@ If you use, adapt, or build upon this work, you must attribute it to:
    John A. McCain
 
 # PEACE MetaLogic
-An attempt to synthesize the Cognitive Science insights of Paul Jorion with the independent research of John McCain
+An attempt to synthesize the Cognitive Science insights of Paul Jorion with the independent research of John McCain and Nicolas Wallner
+
+Paul Jorion's blog:
+
+John McCain's PEACE work:
+
+Nicolas Wallner's candidate for a theory of everything:
 
 ## Mission Statement
 
