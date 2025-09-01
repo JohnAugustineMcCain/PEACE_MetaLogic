@@ -38,6 +38,8 @@ Nicolas Wallner's parrallel insights and candidate for a Theory of Everything (c
 
 [📄 Theory of Everything](./ToE.pdf)
 
+-----
+
 Human understanding is not reducible to logic and reasoning alone. Rather, it arises from a plural toolkit of epistemic instruments:
 
 •	Formal systems: logic, mathematics, computation.
