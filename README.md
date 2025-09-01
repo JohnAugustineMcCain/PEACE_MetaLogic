@@ -30,6 +30,8 @@ https://www.pauljorion.com/blog_en/
 
 John McCain's PEACE idea: 
 
+[📄 PEACE: The Metalogical Framework](./Metalogical_Framework.pdf)
+
 [📄 PEACE: Paraconsistent Epistemic And Contextual Evaluation](./PEACE__Paraconsistent_Epistemic_And_Contextual_Evaluation.pdf)
 
 Nicolas Wallner's candidate for a Theory of Everything (currently only available in German):
