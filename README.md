@@ -9,7 +9,7 @@ If you use, adapt, or build upon this work, you must attribute it to:
 
 This project has been shaped by many conversations, inspirations, and prior works.
 
-The following individuals and communities are gratefully acknowledged for their influence and encouragement.  
+The following individuals and communities are gratefully acknowledged for their influence or encouragement.  
 
 All those named here are **invited to share in the CC BY-NC 4.0 license** of this work, should they wish to be recognized as co-licensors.  
 Inclusion is voluntary and does not imply responsibility for the contents.
