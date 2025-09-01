@@ -34,7 +34,7 @@ John McCain's PEACE idea:
 
 [📄 PEACE: Paraconsistent Epistemic And Contextual Evaluation](./PEACE__Paraconsistent_Epistemic_And_Contextual_Evaluation.pdf)
 
-Nicolas Wallner's candidate for a Theory of Everything (currently only available in German):
+Nicolas Wallner's parrallel insights and candidate for a Theory of Everything (currently only available in German):
 
 [📄 Theory of Everything](./ToE.pdf)
 
