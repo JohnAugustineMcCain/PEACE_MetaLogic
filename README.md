@@ -40,15 +40,15 @@ Nicolas Wallner's parrallel insights and candidate for a Theory of Everything (c
 
 Human understanding is not reducible to logic and reasoning alone. Rather, it arises from a plural toolkit of epistemic instruments:
 
-	•	Formal systems: logic, mathematics, computation.
+•	Formal systems: logic, mathematics, computation.
  
-	•	Empirical methods: experiment, measurement, scientific inference.
+•	Empirical methods: experiment, measurement, scientific inference.
  
-	•	Heuristic cognition: memory, intuition, pattern-recognition.
+•	Heuristic cognition: memory, intuition, pattern-recognition.
  
-	•	Affective and aesthetic faculties: emotion, value, art, culture.
+•	Affective and aesthetic faculties: emotion, value, art, culture.
  
-	•	Normative frameworks: philosophy, ethics, metaphysics.
+•	Normative frameworks: philosophy, ethics, metaphysics.
 
 Each of these contributes partial, sometimes inconsistent, but indispensable information.
 
