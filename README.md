@@ -35,7 +35,7 @@ Paul Jorion's 2022 work (Please read):
 John McCain's 2025 work:
 
 ASKING FOR CO-AUTHORSHIP:
-[📄 What Makes a Demon Worthy of Its Name (PDF)](./What_makes_a__Demon__worthy_of_its_name_.pdf)
+[📄 What makes a Demon worthy of its name? (PDF)](./What_makes_a__Demon__worthy_of_its_name_.pdf)
 
 [📄 PEACE: The Metalogical Framework](./Metalogical_Framework.pdf)
 
