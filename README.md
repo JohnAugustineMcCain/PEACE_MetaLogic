@@ -32,7 +32,10 @@ Paul Jorion's 2022 work (Please read):
 
 [What makes a demonstration worthy of the name?](https://raw.githubusercontent.com/JohnAugustineMcCain/PEACE_MetaLogic/main/What%20makes%20a%20demonstration%20worthy%20of%20the%20name%3F.pdf)
 
-John McCain's PEACE idea: 
+John McCain's 2025 work:
+
+ASKING FOR CO-AUTHORSHIP:
+[📄 What Makes a Demon Worthy of Its Name (PDF)](./What_makes_a__Demon__worthy_of_its_name_.pdf)
 
 [📄 PEACE: The Metalogical Framework](./Metalogical_Framework.pdf)
 
