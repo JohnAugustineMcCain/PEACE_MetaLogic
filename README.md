@@ -64,7 +64,7 @@ Instead of stopping at “answers,” it models how knowing itself unfolds — t
 
 The goal is to explore how machines can **reason about their own reasoning**, tracking confidence, novelty, and epistemic context completeness as priorities.
 
-This project is both a working prototype and a research experiment: part logic engine, part cognitive model, and part invitation to re-imagine what it means for AI to *know*.
+This project is both a working prototype and a research experiment: part logic engine, part cognitive model, and part invitation to re-imagine what it means for humans and AI to *know*.
 
 ## First toy prototype (untested)
 
