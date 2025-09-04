@@ -14,7 +14,6 @@ The following individuals and communities are gratefully acknowledged for their 
 All those named here are **invited to share in the CC BY-NC 4.0 license** of this work, should they wish to be recognized as co-licensors.  
 Inclusion is voluntary and does not imply responsibility for the contents.
 
-- Paul Jorion
 - Nicolas Wallner
 - Jessica McCain
 
