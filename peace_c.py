@@ -23,6 +23,17 @@ import math
 import random
 import textwrap
 
+__all__ = [
+    "TruthValue", "tv_to_str", "DESIGNATED",
+    "Evidence", "EvidenceStore",
+    "Context", "Perspective",
+    "LLMAdapter", "MockLLM",
+    "CcEstimator",
+    "OracleVerdict", "Oracle",
+    "EngineConfig", "Engine",
+    "empirical_pattern_perspective", "pragmatic_context_perspective",
+]
+
 # ----------------------------
 # Truth values & basic helpers
 # ----------------------------
@@ -121,7 +132,7 @@ class MockLLM:
         # Primitive, prompt-sensitive behaviors to simulate useful outputs.
         p = prompt.lower()
         if "propose 5 clarifying questions" in p:
-            return "\\n".join([
+            return "\n".join([
                 "What is the precise claim and its time frame?",
                 "Which definitions are we using for key terms?",
                 "What sources are admissible as evidence here?",
@@ -135,13 +146,13 @@ class MockLLM:
             return random.choice(["T 0.62 Rationale: pattern prior supports truth.",
                                   "F 0.64 Rationale: pattern prior opposes truth."])
         if "generate candidate perspectives" in p:
-            return "\\n".join([
+            return "\n".join([
                 "EmpiricalPattern: assume regularities found in corpus hold here.",
                 "CausalMechanism: assume a causal story must support the claim.",
                 "PragmaticContext: assume speaker intent and stakes matter.",
             ])
         if "evidence snippets" in p:
-            return "\\n".join([
+            return "\n".join([
                 "Pro: Independent report aligns with the claim.",
                 "Con: Source credibility is uncertain; possible bias.",
             ])
@@ -233,6 +244,10 @@ class Engine:
     perspectives: List[Perspective] = field(default_factory=list)
     llm: LLMAdapter = field(default_factory=MockLLM)
 
+    # NEW — provenance fields (read by metadataengine.py)
+    last_cc: Optional[float] = None
+    last_novelty: Optional[float] = None
+
     def measure_novelty(self, phi: str, ctx: Context) -> float:
         # Crude novelty proxy: few facts + many needed → high novelty
         nfacts = len(ctx.facts)
@@ -284,20 +299,37 @@ class Engine:
         return ctx
 
     def tick(self, phi: str, ctx: Context) -> Tuple[TruthValue, float, str]:
+        """Single evaluation step:
+        - Measure novelty (store to last_novelty)
+        - Optionally expand liminally
+        - Get oracle verdict
+        - Compute Cc once (store to last_cc) and integrate with contextual verdict if needed
+        """
         novelty = self.measure_novelty(phi, ctx)
+        self.last_novelty = novelty  # NEW: record novelty for provenance
+
         if novelty > self.config.novelty_threshold:
             ctx = self.liminal_expand(phi, ctx)
 
         # Quick oracle pass
         o = self.oracle.predict(phi, ctx)
+
+        # Compute Cc once and record for provenance
+        cc_val = self.cc.compute(phi, ctx)     # NEW
+        self.last_cc = cc_val                  # NEW
+
         # If oracle says B with low conf, try contextual verdict
         if o.tv == TruthValue.B and o.confidence < 0.66:
             tv = self.contextual_verdict(phi, ctx)
-            conf = max(o.confidence, self.cc.compute(phi, ctx))
-            rationale = f"Contextual verdict {tv_to_str(tv)} at Cc={self.cc.compute(phi, ctx):.2f}; Oracle said: {o.rationale}"
+            conf = max(o.confidence, cc_val)
+            rationale = (
+                f"Contextual verdict {tv_to_str(tv)} at Cc={cc_val:.2f}; "
+                f"Oracle said: {o.rationale}"
+            )
             return tv, conf, rationale
         else:
-            return o.tv, o.confidence, o.rationale
+            # Include Cc in rationale and ensure confidence ≥ Cc
+            return o.tv, max(o.confidence, cc_val), f"{o.rationale} [Cc={cc_val:.2f}]"
 
 # ----------------------------
 # Default perspectives
