@@ -5,16 +5,21 @@
 #
 # Random-probe Goldbach sampler centered at n/2
 # + Sweep mode to measure how hit-rate (and thus heuristic certainty) scales with digits.
+# + Baillie–PSW primality test (practically deterministic)
+# + Optional extra random Miller–Rabin rounds after BPSW (belt & suspenders)
+# + Example decompositions printed at end of sweep
 #
 # (c) 2025 John Augustine McCain — MIT-style permissive for this prototype
 
 from __future__ import annotations
-from dataclasses import dataclass, field
 from typing import Optional, Tuple, List, Dict, Any, Iterable, Set
-import argparse, random, json, csv
+import argparse, random, json, csv, math
+
+# Module-level knob set by CLI: extra MR rounds AFTER BPSW (default 0)
+_EXTRA_MR_ROUNDS: int = 0
 
 # =========================
-#  Lightweight MR primality
+#  Lightweight small primes
 # =========================
 
 _SMALL_PRIMES: List[int] = [2,3,5,7,11,13,17,19,23,29,31,37]
@@ -35,25 +40,143 @@ def _mr_witness(a: int, d: int, n: int, s: int) -> bool:
             return False
     return True  # a is a witness (composite)
 
-def _mr_rounds_for_digits(d: int) -> int:
-    # A few rounds suffice for randomized evidence (we're sampling, not certifying)
-    if d <= 18: return 8
-    if d <= 24: return 6
-    if d <= 34: return 5
-    return 4
+# =========================
+#  Baillie–PSW + optional MR
+# =========================
 
-def is_probable_prime(n: int, rng: random.Random) -> bool:
-    if n < 2: return False
+def _is_perfect_square(n: int) -> bool:
+    if n < 0:
+        return False
+    r = math.isqrt(n)
+    return r * r == n
+
+def _mr_strong_base(n: int, a: int) -> bool:
+    """Strong probable-prime test to base a (returns True if passes)."""
+    if n % 2 == 0:
+        return n == 2
+    d = n - 1
+    s = 0
+    while d % 2 == 0:
+        d //= 2
+        s += 1
+    x = pow(a % n, d, n)
+    if x == 1 or x == n - 1:
+        return True
+    for _ in range(s - 1):
+        x = (x * x) % n
+        if x == n - 1:
+            return True
+    return False
+
+def _mr_strong_base2(n: int) -> bool:
+    return _mr_strong_base(n, 2)
+
+def _jacobi(a: int, n: int) -> int:
+    """Jacobi symbol (a/n), n odd positive."""
+    assert n > 0 and n % 2 == 1
+    a %= n
+    result = 1
+    while a:
+        while a % 2 == 0:
+            a //= 2
+            r = n % 8
+            if r in (3, 5):
+                result = -result
+        a, n = n, a  # reciprocity
+        if a % 4 == 3 and n % 4 == 3:
+            result = -result
+        a %= n
+    return result if n == 1 else 0
+
+def _lucas_strong_prp(n: int) -> bool:
+    """
+    Strong Lucas probable-prime test with Selfridge parameters.
+    Returns True if n is a strong Lucas probable prime.
+    """
+    if n == 2:
+        return True
+    if n < 2 or n % 2 == 0 or _is_perfect_square(n):
+        return False
+
+    # Selfridge: find D with Jacobi(D/n) = -1, D = 5, -7, 9, -11, 13, ...
+    D = 5
+    while True:
+        j = _jacobi(D, n)
+        if j == -1:
+            break
+        if j == 0:
+            return False  # D | n
+        D = -(abs(D) + 2) if D > 0 else abs(D) + 2
+
+    P = 1
+    Q = (1 - D) // 4  # integer by construction
+
+    # write n+1 = d * 2^s, d odd
+    d = n + 1
+    s = 0
+    while d % 2 == 0:
+        d //= 2
+        s += 1
+
+    # Lucas via binary powering (compute U_k, V_k mod n)
+    def _lucas_uv_mod(k: int) -> Tuple[int, int]:
+        U, V = 0, 2
+        qk = 1
+        bits = bin(k)[2:]
+        for b in bits:
+            # double
+            U2 = (U * V) % n
+            V2 = (V * V - 2 * qk) % n
+            qk = (qk * qk) % n
+            if b == '0':
+                U, V = U2, V2
+            else:
+                # add-one
+                U = ((P * U2 + V2) * pow(2, -1, n)) % n
+                V = ((D * U2 + P * V2) * pow(2, -1, n)) % n
+                qk = (qk * Q) % n
+        return U, V
+
+    Ud, Vd = _lucas_uv_mod(d)
+    if Vd % n == 0:
+        return True
+    # Check V_{d*2^r}
+    for r in range(1, s + 1):
+        Vd = (Vd * Vd - 2 * pow(Q, d * (1 << (r - 1)), n)) % n
+        if Vd % n == 0:
+            return True
+    return False
+
+def is_probable_prime(n: int, rng: Optional[random.Random] = None) -> bool:
+    """
+    Baillie–PSW wrapper (practically deterministic), plus optional extra MR rounds:
+      1) small-prime trial division
+      2) strong base-2 Miller–Rabin
+      3) strong Lucas probable prime
+      4) OPTIONAL: extra random MR rounds (bases sampled by rng) for belt & suspenders
+    """
+    if n < 2:
+        return False
     for p in _SMALL_PRIMES:
-        if n == p: return True
-        if n % p == 0: return False
-    d, s = _decompose(n)
-    rounds = _mr_rounds_for_digits(len(str(n)))
-    max_base = n - 2
-    for _ in range(rounds):
-        a = rng.randrange(2, max_base + 1) if max_base >= 2 else 2
-        if _mr_witness(a, d, n, s):
+        if n == p:
+            return True
+        if n % p == 0:
             return False
+    if not _mr_strong_base2(n):
+        return False
+    if not _lucas_strong_prp(n):
+        return False
+    # Optional extra MR rounds with random bases (if requested)
+    rounds = max(0, int(_EXTRA_MR_ROUNDS))
+    if rounds > 0:
+        if rng is None:
+            rng = random.Random(0xC0FFEE)
+        d, s = _decompose(n)
+        for _ in range(rounds):
+            # choose base in [2, n-2]
+            a = 2 if n <= 4 else rng.randrange(2, n - 1)
+            if _mr_witness(a, d, n, s):
+                return False
     return True
 
 # =========================
@@ -88,7 +211,7 @@ def centered_pairs_iter(
 
     Strategy: random ring-expansion around n/2.
       - draw delta in [-window, window], set p = n//2 + delta (forced odd)
-      - test p and q=n-p with MR
+      - test p and q=n-p with is_probable_prime()
       - avoid duplicates; stop after per_n_trials draws
     """
     if n % 2 != 0 or n < 4:
@@ -139,13 +262,13 @@ def first_hit_centered(
     rng: random.Random,
     per_n_trials: int,
     window: Optional[int] = None,
-) -> Tuple[bool, Optional[int], int]:
+) -> Tuple[bool, Optional[int], int, Optional[Tuple[int,int]]]:
     """
-    Returns (found, delta_from_half, tries_used).
+    Returns (found, delta_from_half, tries_used, pair_if_found)
     'tries_used' counts actual candidate draws (p choices).
     """
     if n % 2 != 0 or n < 4:
-        return (False, None, 0)
+        return (False, None, 0, None)
 
     half = n // 2
     if window is None:
@@ -155,7 +278,7 @@ def first_hit_centered(
     q0 = n - 2
     tries_used = 0
     if is_probable_prime(q0, rng):
-        return (True, abs(2 - half), tries_used)
+        return (True, abs(2 - half), tries_used, (2, q0))
 
     for _ in range(per_n_trials):
         delta = rng.randint(-window, window)
@@ -173,10 +296,10 @@ def first_hit_centered(
             tries_used += 1
             continue
         if is_probable_prime(p, rng) and is_probable_prime(q, rng):
-            return (True, abs(p - half), tries_used + 1)
+            return (True, abs(p - half), tries_used + 1, (min(p,q), max(p,q)))
         tries_used += 1
 
-    return (False, None, tries_used)
+    return (False, None, tries_used, None)
 
 # =========================
 #  Friendly rationale (updated)
@@ -196,6 +319,7 @@ def rationale() -> str:
         "  up to the point where numbers become so astronomically large that our finite probe budget ceases to be informative.\n\n"
         "This is not a formal proof. It is experimental mathematics: a meta-level argument where rising hit-rates under fixed budget provide\n"
         "increasing empirical support for the conjecture across growing scales (before computational limits dominate).\n"
+        "Primality is checked via Baillie–PSW (practically deterministic), optionally reinforced with extra random Miller–Rabin rounds.\n"
     )
 
 # =========================
@@ -248,9 +372,11 @@ def _ascii_bar(frac: float, width: int = 40) -> str:
 # =========================
 
 def main() -> None:
+    global _EXTRA_MR_ROUNDS
+
     ap = argparse.ArgumentParser(
         prog="peace-gb-centered",
-        description="Random Goldbach sampler centered at n/2. Single-run or sweep to measure accuracy vs digits."
+        description="Random Goldbach sampler centered at n/2. Single-run or sweep; BPSW primality; optional extra MR rounds."
     )
     # single-run (original behavior)
     ap.add_argument("--digits", type=lambda s: _positive_int("--digits", s),
@@ -282,12 +408,21 @@ def main() -> None:
                     help="When set (e.g., results.csv), write sweep summary to CSV.")
     ap.add_argument("--jsonl", type=str, default=None,
                     help="When set (e.g., rows.jsonl), write per-row sweep results to JSONL.")
+    ap.add_argument("--examples", type=int, default=2,
+                    help="How many random example decompositions to print at end of sweep (default 2; 0 = none).")
+
+    # new: extra MR rounds (belt & suspenders)
+    ap.add_argument("--extra-mr-rounds", type=int, default=0,
+                    help="After BPSW passes, perform this many extra random MR rounds (default 0).")
 
     args = ap.parse_args()
 
     if args.why:
         print(rationale())
         return
+
+    # set module-level knob
+    _EXTRA_MR_ROUNDS = max(0, int(args.extra_mr_rounds))
 
     # Determine mode
     in_sweep = (args.digits_list is not None) or (args.sweep is not None)
@@ -307,31 +442,44 @@ def main() -> None:
 
         summary_rows: List[Dict[str, Any]] = []
         jsonl_rows: List[Dict[str, Any]] = []
+        # For printed examples at the end
+        example_pool: List[Dict[str, Any]] = []
 
         if not args.quiet:
             print("\n# Measuring centered-heuristic accuracy vs. digits")
             print("# (hit = find at least one pair within per-n budget)")
-            print(f"# per_n_trials={args.per_n_trials} | samples per digit={args.samples} | seed={args.seed}\n")
+            print(f"# per_n_trials={args.per_n_trials} | samples per digit={args.samples} | seed={args.seed} | extraMR={_EXTRA_MR_ROUNDS}\n")
 
         for D in digits_space:
             hits = 0
             tries_on_hits: List[int] = []
             deltas_on_hits: List[int] = []
+            # Collect a few examples per D opportunistically
+            local_examples: List[Dict[str, Any]] = []
+
             for _ in range(args.samples):
                 n = random_even_with_digits(D, rng)
-                found, delta, tries_used = first_hit_centered(
+                found, delta, tries_used, pair = first_hit_centered(
                     n, rng=rng, per_n_trials=args.per_n_trials, window=args.window
                 )
                 if found:
                     hits += 1
                     tries_on_hits.append(tries_used)
                     deltas_on_hits.append(delta if delta is not None else 0)
+                    # store one example for this n
+                    if pair and len(local_examples) < 3:  # cap small per digit
+                        p, q = pair
+                        local_examples.append({
+                            "digits": D, "n": str(n), "p": str(p), "q": str(q),
+                            "delta": delta, "tries": tries_used
+                        })
 
                 if args.jsonl:
                     jsonl_rows.append({
                         "digits": D, "n": str(n), "found": found,
                         "delta_from_half": delta, "tries_used": tries_used,
-                        "per_n_trials": args.per_n_trials, "seed": args.seed
+                        "per_n_trials": args.per_n_trials, "window": args.window,
+                        "seed": args.seed, "extra_mr_rounds": _EXTRA_MR_ROUNDS
                     })
 
             total = args.samples
@@ -352,8 +500,12 @@ def main() -> None:
                 "hit_rate": round(hit_rate, 6),
                 "avg_trials_to_hit": round(avg_tries, 3) if avg_tries is not None else None,
                 "median_delta_from_half": median_delta,
-                "per_n_trials": args.per_n_trials, "window": args.window, "seed": args.seed
+                "per_n_trials": args.per_n_trials, "window": args.window,
+                "seed": args.seed, "extra_mr_rounds": _EXTRA_MR_ROUNDS
             })
+
+            # merge a few local examples into global pool
+            example_pool.extend(local_examples)
 
         if args.csv and summary_rows:
             with open(args.csv, "w", newline="") as f:
@@ -368,25 +520,45 @@ def main() -> None:
                     f.write(json.dumps(r) + "\n")
             print(f"[saved] JSONL -> {args.jsonl}")
 
+        # Print a couple random example decompositions
+        if args.examples and example_pool:
+            k = min(args.examples, len(example_pool))
+            rnd = random.Random(args.seed ^ 0xA11CE)  # independent pick
+            picks = rnd.sample(example_pool, k)
+            print("\n# Example decompositions (random selection from this sweep)")
+            for ex in picks:
+                print(f"{ex['digits']:>3}d Δ={ex['delta']:<7} tries={ex['tries']:<5}  "
+                      f"{ex['p']} + {ex['q']} = {ex['n']}")
+
         return
 
     # ---------- SINGLE-RUN MODE (original behavior) ----------
-    for i in range(args.count):
-        n = random_even_with_digits(args.digits, rng)
-        printed = 0
-        for (p, q) in centered_pairs_iter(
-            n, rng=rng, per_n_trials=args.per_n_trials, window=args.window
-        ):
-            if args.pairs_only:
+    printed = 0
+    if args.pairs_only:
+        for i in range(args.count):
+            n = random_even_with_digits(args.digits, rng)
+            for (p, q) in centered_pairs_iter(
+                n, rng=rng, per_n_trials=args.per_n_trials, window=args.window
+            ):
                 print(f"{p} + {q} = {n}")
-            else:
+                printed += 1
+                if printed >= args.per_n_count:
+                    break
+    else:
+        for i in range(args.count):
+            n = random_even_with_digits(args.digits, rng)
+            local_printed = 0
+            for (p, q) in centered_pairs_iter(
+                n, rng=rng, per_n_trials=args.per_n_trials, window=args.window
+            ):
                 dist = abs(p - (n // 2))
                 print(f"[{i+1:>3}/{args.count}] n({args.digits}d)  |  p≈n/2? Δ={dist}  ->  {p} + {q} = {n}")
-            printed += 1
-            if printed >= args.per_n_count:
-                break
-        if printed == 0 and not args.pairs_only:
-            print(f"# miss for n={n} within budget (trials={args.per_n_trials}, window={args.window})")
+                printed += 1
+                local_printed += 1
+                if local_printed >= args.per_n_count:
+                    break
+            if local_printed == 0:
+                print(f"# miss for n={n} within budget (trials={args.per_n_trials}, window={args.window})")
 
 if __name__ == "__main__":
     main()
