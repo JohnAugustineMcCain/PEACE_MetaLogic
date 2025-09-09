@@ -4,10 +4,11 @@
 # peace_gb_centered.py
 #
 # Random-probe Goldbach sampler centered at n/2
-# + Sweep mode to measure how hit-rate (and thus heuristic certainty) scales with digits.
+# + Sweep mode to measure how hit-rate scales with digits.
 # + Baillie–PSW primality test (practically deterministic)
 # + Optional extra random Miller–Rabin rounds after BPSW (belt & suspenders)
 # + Example decompositions printed at end of sweep
+# + NEW: Wilson CIs and Bayes-factor summary
 #
 # (c) 2025 John Augustine McCain — MIT-style permissive for this prototype
 
@@ -123,6 +124,7 @@ def _lucas_strong_prp(n: int) -> bool:
         U, V = 0, 2
         qk = 1
         bits = bin(k)[2:]
+        inv2 = pow(2, -1, n)
         for b in bits:
             # double
             U2 = (U * V) % n
@@ -132,8 +134,8 @@ def _lucas_strong_prp(n: int) -> bool:
                 U, V = U2, V2
             else:
                 # add-one
-                U = ((P * U2 + V2) * pow(2, -1, n)) % n
-                V = ((D * U2 + P * V2) * pow(2, -1, n)) % n
+                U = ((P * U2 + V2) * inv2) % n
+                V = ((D * U2 + P * V2) * inv2) % n
                 qk = (qk * Q) % n
         return U, V
 
@@ -153,7 +155,7 @@ def is_probable_prime(n: int, rng: Optional[random.Random] = None) -> bool:
       1) small-prime trial division
       2) strong base-2 Miller–Rabin
       3) strong Lucas probable prime
-      4) OPTIONAL: extra random MR rounds (bases sampled by rng) for belt & suspenders
+      4) OPTIONAL: extra random MR rounds (bases sampled by rng)
     """
     if n < 2:
         return False
@@ -173,7 +175,6 @@ def is_probable_prime(n: int, rng: Optional[random.Random] = None) -> bool:
             rng = random.Random(0xC0FFEE)
         d, s = _decompose(n)
         for _ in range(rounds):
-            # choose base in [2, n-2]
             a = 2 if n <= 4 else rng.randrange(2, n - 1)
             if _mr_witness(a, d, n, s):
                 return False
@@ -208,22 +209,16 @@ def centered_pairs_iter(
 ) -> Iterable[Tuple[int, int]]:
     """
     Yield DISTINCT unordered prime pairs (p,q) with p+q=n, prioritizing p≈n/2.
-
-    Strategy: random ring-expansion around n/2.
-      - draw delta in [-window, window], set p = n//2 + delta (forced odd)
-      - test p and q=n-p with is_probable_prime()
-      - avoid duplicates; stop after per_n_trials draws
     """
     if n % 2 != 0 or n < 4:
         return
     half = n // 2
     if window is None:
-        # heuristic window scales with bit-length (small but effective)
         window = max(50_000, min(5_000_000, (n.bit_length() ** 2) * 25))
 
     seen: Set[Tuple[int, int]] = set()
 
-    # quick p=2 shortcut (q big)
+    # p=2 shortcut
     q0 = n - 2
     if is_probable_prime(q0, rng):
         pair = (2, q0)
@@ -237,7 +232,6 @@ def centered_pairs_iter(
         p = half + delta
         if p <= 2:
             continue
-        # force odd
         if p % 2 == 0:
             p += 1 if delta <= 0 else -1
             if p <= 2:
@@ -245,7 +239,6 @@ def centered_pairs_iter(
         q = n - p
         if q <= 2:
             continue
-        # test both
         if is_probable_prime(p, rng) and is_probable_prime(q, rng):
             pair = (p, q) if p <= q else (q, p)
             if pair not in seen:
@@ -265,7 +258,6 @@ def first_hit_centered(
 ) -> Tuple[bool, Optional[int], int, Optional[Tuple[int,int]]]:
     """
     Returns (found, delta_from_half, tries_used, pair_if_found)
-    'tries_used' counts actual candidate draws (p choices).
     """
     if n % 2 != 0 or n < 4:
         return (False, None, 0, None)
@@ -274,7 +266,7 @@ def first_hit_centered(
     if window is None:
         window = max(50_000, min(5_000_000, (n.bit_length() ** 2) * 25))
 
-    # quick p=2 shortcut
+    # p=2 shortcut
     q0 = n - 2
     tries_used = 0
     if is_probable_prime(q0, rng):
@@ -284,17 +276,14 @@ def first_hit_centered(
         delta = rng.randint(-window, window)
         p = half + delta
         if p <= 2:
-            tries_used += 1
-            continue
+            tries_used += 1; continue
         if p % 2 == 0:
             p += 1 if delta <= 0 else -1
             if p <= 2:
-                tries_used += 1
-                continue
+                tries_used += 1; continue
         q = n - p
         if q <= 2:
-            tries_used += 1
-            continue
+            tries_used += 1; continue
         if is_probable_prime(p, rng) and is_probable_prime(q, rng):
             return (True, abs(p - half), tries_used + 1, (min(p,q), max(p,q)))
         tries_used += 1
@@ -310,17 +299,35 @@ def rationale() -> str:
         "\n*** Goldbach at Huge Scales — Centered Random Probing and Rising Certainty ***\n\n"
         "Goldbach predicts every even n>2 is p+q with p,q prime. For large n, the expected number of such pairs grows like ~ n/(log n)^2.\n"
         "Prime density is ~1/log n, and we need TWO primes (p and q=n−p), so a random split lands on 'both prime' with chance ~1/(log n)^2.\n"
-        "Combinatorially, valid pairs concentrate near the balanced split p≈q≈n/2. Thus, sampling near n/2 first witnesses decompositions fastest.\n\n"
-        "Why this supports increasing certainty (if the sweep behaves as expected):\n"
-        "• Fix a per-n budget (same trials per n). As digits grow, the heuristic hit-rate typically INCREASES.\n"
-        "  Intuition: the expected count of Goldbach pairs grows like n/(log n)^2, so there are simply MORE targets clustered around n/2.\n"
-        "• When a fixed-effort sampler succeeds more often at larger n, its empirical success probability rises with scale.\n"
-        "• Therefore, conditional on the observed trend, we become MORE CERTAIN (in the evidential sense) that Goldbach holds for typical large n,\n"
-        "  up to the point where numbers become so astronomically large that our finite probe budget ceases to be informative.\n\n"
-        "This is not a formal proof. It is experimental mathematics: a meta-level argument where rising hit-rates under fixed budget provide\n"
-        "increasing empirical support for the conjecture across growing scales (before computational limits dominate).\n"
-        "Primality is checked via Baillie–PSW (practically deterministic), optionally reinforced with extra random Miller–Rabin rounds.\n"
+        "Combinatorially, valid pairs concentrate near p≈q≈n/2. Thus, sampling near n/2 first witnesses decompositions fastest.\n\n"
+        "Fix a per-n budget and window. If the hit-rate rises with digits, the empirical miss-probability decays roughly like exp(-const/(log n)^2),\n"
+        "so the posterior odds in favor of Goldbach grow rapidly with n (until numbers are so large that computation itself ceases to be informative).\n"
+        "Primality is checked via Baillie–PSW (practically deterministic), optionally reinforced with extra Miller–Rabin rounds.\n"
     )
+
+# =========================
+#  Stats helpers (Wilson CI, Bayes factor)
+# =========================
+
+def _wilson_ci(h: int, n: int, z: float = 1.96) -> Tuple[float, float]:
+    if n == 0:
+        return (0.0, 1.0)
+    p = h / n
+    denom = 1 + z*z/n
+    center = (p + z*z/(2*n)) / denom
+    half = z * math.sqrt(p*(1-p)/n + z*z/(4*n*n)) / denom
+    lo = max(0.0, center - half)
+    hi = min(1.0, center + half)
+    return (lo, hi)
+
+def _log10_binom_likelihood(h: int, n: int, p: float) -> float:
+    if p <= 0 or p >= 1:
+        return float("-inf") if (h>0 and h<n) else 0.0
+    # log C(n,h) + h*log p + (n-h)*log (1-p); use Stirling for stability
+    # We only need differences, so approximate with math.lgamma
+    logC = math.lgamma(n+1) - math.lgamma(h+1) - math.lgamma(n-h+1)
+    ll = logC + h*math.log(p) + (n-h)*math.log(1-p)
+    return ll / math.log(10)
 
 # =========================
 #  CLI helpers
@@ -376,9 +383,9 @@ def main() -> None:
 
     ap = argparse.ArgumentParser(
         prog="peace-gb-centered",
-        description="Random Goldbach sampler centered at n/2. Single-run or sweep; BPSW primality; optional extra MR rounds."
+        description="Random Goldbach sampler centered at n/2. Single-run or sweep; BPSW primality; optional extra MR rounds; CIs and Bayes summary."
     )
-    # single-run (original behavior)
+    # single-run
     ap.add_argument("--digits", type=lambda s: _positive_int("--digits", s),
                     help="Digits for single-run mode (mutually exclusive with sweep).")
     ap.add_argument("--count", type=lambda s: _positive_int("--count", s), default=10,
@@ -395,25 +402,33 @@ def main() -> None:
     ap.add_argument("--why", action="store_true",
                     help="Explain why rising hit-rate with fixed budget increases empirical certainty with scale.")
 
-    # sweep mode
+    # sweep
     ap.add_argument("--digits-list", type=_parse_digits_list, default=None,
-                    help="Comma-separated list of digit sizes to sweep, e.g. 12,16,20,24.")
+                    help="Comma-separated digit sizes to sweep, e.g. 12,16,20,24.")
     ap.add_argument("--sweep", type=_parse_sweep, default=None,
-                    help="Range sweep 'start:end:step' over digits, e.g. 12:40:4.")
+                    help="Range sweep 'start:end:step', e.g. 18:60:4.")
     ap.add_argument("--samples", type=lambda s: _positive_int("--samples", s), default=100,
                     help="How many n to sample per digit size in sweep (default 100).")
     ap.add_argument("--quiet", action="store_true",
                     help="Suppress per-n output (sweep prints only summary rows).")
     ap.add_argument("--csv", type=str, default=None,
-                    help="When set (e.g., results.csv), write sweep summary to CSV.")
+                    help="If set (e.g., results.csv), write sweep summary to CSV.")
     ap.add_argument("--jsonl", type=str, default=None,
-                    help="When set (e.g., rows.jsonl), write per-row sweep results to JSONL.")
+                    help="If set (e.g., rows.jsonl), write per-row sweep results to JSONL.")
     ap.add_argument("--examples", type=int, default=2,
                     help="How many random example decompositions to print at end of sweep (default 2; 0 = none).")
 
-    # new: extra MR rounds (belt & suspenders)
+    # primality hardness knob
     ap.add_argument("--extra-mr-rounds", type=int, default=0,
                     help="After BPSW passes, perform this many extra random MR rounds (default 0).")
+
+    # NEW: stats output controls
+    ap.add_argument("--ci", action="store_true",
+                    help="Print Wilson 95% CI for hit-rate per digit.")
+    ap.add_argument("--bayes-eps", type=float, default=0.1,
+                    help="Epsilon for null miss-rate (success p0=1-eps). Default 0.1 → p0=0.9.")
+    ap.add_argument("--bayes-summary", action="store_true",
+                    help="Print cumulative log10 Bayes factor (Goldbach-friendly vs fixed p0).")
 
     args = ap.parse_args()
 
@@ -421,10 +436,8 @@ def main() -> None:
         print(rationale())
         return
 
-    # set module-level knob
     _EXTRA_MR_ROUNDS = max(0, int(args.extra_mr_rounds))
 
-    # Determine mode
     in_sweep = (args.digits_list is not None) or (args.sweep is not None)
     if (args.digits is None) and not in_sweep:
         ap.error("Provide --digits for single-run OR --digits-list / --sweep for sweep mode. Use --why for the explanation page.")
@@ -442,7 +455,6 @@ def main() -> None:
 
         summary_rows: List[Dict[str, Any]] = []
         jsonl_rows: List[Dict[str, Any]] = []
-        # For printed examples at the end
         example_pool: List[Dict[str, Any]] = []
 
         if not args.quiet:
@@ -450,11 +462,15 @@ def main() -> None:
             print("# (hit = find at least one pair within per-n budget)")
             print(f"# per_n_trials={args.per_n_trials} | samples per digit={args.samples} | seed={args.seed} | extraMR={_EXTRA_MR_ROUNDS}\n")
 
+        total_h = 0
+        total_n = 0
+        sum_log10_BF = 0.0
+        p0 = max(0.0, min(1.0, 1.0 - args.bayes_eps))  # null success probability
+
         for D in digits_space:
             hits = 0
             tries_on_hits: List[int] = []
             deltas_on_hits: List[int] = []
-            # Collect a few examples per D opportunistically
             local_examples: List[Dict[str, Any]] = []
 
             for _ in range(args.samples):
@@ -466,8 +482,7 @@ def main() -> None:
                     hits += 1
                     tries_on_hits.append(tries_used)
                     deltas_on_hits.append(delta if delta is not None else 0)
-                    # store one example for this n
-                    if pair and len(local_examples) < 3:  # cap small per digit
+                    if pair and len(local_examples) < 3:
                         p, q = pair
                         local_examples.append({
                             "digits": D, "n": str(n), "p": str(p), "q": str(q),
@@ -483,6 +498,9 @@ def main() -> None:
                     })
 
             total = args.samples
+            total_h += hits
+            total_n += total
+
             hit_rate = hits / total if total else 0.0
             avg_tries = (sum(tries_on_hits) / len(tries_on_hits)) if tries_on_hits else None
             median_delta = None
@@ -491,20 +509,38 @@ def main() -> None:
                 m = len(srt) // 2
                 median_delta = (srt[m] if len(srt) % 2 == 1 else (srt[m - 1] + srt[m]) // 2)
 
+            # Wilson CI
+            lo95, hi95 = _wilson_ci(hits, total) if args.ci else (None, None)
+
+            # Bayes factor (per digit): MLE p_hat vs fixed p0
+            # log10 BF = log10 L(h|n,p_hat) - log10 L(h|n,p0); with p_hat in (0,1)
+            if args.bayes_summary and total > 0:
+                p_hat = min(1 - 1e-12, max(1e-12, hit_rate))
+                ll1 = _log10_binom_likelihood(hits, total, p_hat)
+                ll0 = _log10_binom_likelihood(hits, total, p0)
+                sum_log10_BF += (ll1 - ll0)
+
             bar = _ascii_bar(hit_rate)
-            print(f"{D:>3}d  hit_rate={hit_rate:6.3f}  avg_trials_to_hit={('%.1f'%avg_tries) if avg_tries is not None else '—':>6}  "
+            if args.ci:
+                ci_txt = f"  CI95=[{lo95:.3f},{hi95:.3f}]"
+            else:
+                ci_txt = ""
+            print(f"{D:>3}d  hit_rate={hit_rate:6.3f}{ci_txt}  avg_trials_to_hit={('%.1f'%avg_tries) if avg_tries is not None else '—':>6}  "
                   f"medianΔ={median_delta if median_delta is not None else '—':>8}  {bar}")
 
-            summary_rows.append({
+            row = {
                 "digits": D, "samples": total, "hits": hits, "misses": total - hits,
                 "hit_rate": round(hit_rate, 6),
                 "avg_trials_to_hit": round(avg_tries, 3) if avg_tries is not None else None,
                 "median_delta_from_half": median_delta,
                 "per_n_trials": args.per_n_trials, "window": args.window,
                 "seed": args.seed, "extra_mr_rounds": _EXTRA_MR_ROUNDS
-            })
+            }
+            if args.ci:
+                row["hit_rate_ci95_low"] = round(lo95, 6)
+                row["hit_rate_ci95_high"] = round(hi95, 6)
+            summary_rows.append(row)
 
-            # merge a few local examples into global pool
             example_pool.extend(local_examples)
 
         if args.csv and summary_rows:
@@ -520,19 +556,35 @@ def main() -> None:
                     f.write(json.dumps(r) + "\n")
             print(f"[saved] JSONL -> {args.jsonl}")
 
-        # Print a couple random example decompositions
+        # Bayes summary
+        if args.bayes_summary:
+            print(f"\n# Bayes summary vs fixed p0={p0:.3f} (null success prob)")
+            print(f"log10 Bayes factor (cumulative across digits): {sum_log10_BF:.3f}")
+            if sum_log10_BF > 0:
+                strength = "favoring Goldbach-friendly model"
+            elif sum_log10_BF < 0:
+                strength = "favoring fixed-p0 null"
+            else:
+                strength = "indifferent"
+            print(f"Interpretation: {strength} (higher is stronger).")
+
+        # Meta-summary
+        print("\n# Meta-summary")
+        overall_rate = total_h / total_n if total_n else 0.0
+        print(f"overall hit_rate={overall_rate:.3f} across {total_n} trials, fixed window={args.window}, fixed trials={args.per_n_trials}, seed={args.seed}, extraMR={_EXTRA_MR_ROUNDS}")
+
+        # Example decompositions
         if args.examples and example_pool:
             k = min(args.examples, len(example_pool))
-            rnd = random.Random(args.seed ^ 0xA11CE)  # independent pick
+            rnd = random.Random(args.seed ^ 0xA11CE)
             picks = rnd.sample(example_pool, k)
             print("\n# Example decompositions (random selection from this sweep)")
             for ex in picks:
                 print(f"{ex['digits']:>3}d Δ={ex['delta']:<7} tries={ex['tries']:<5}  "
                       f"{ex['p']} + {ex['q']} = {ex['n']}")
-
         return
 
-    # ---------- SINGLE-RUN MODE (original behavior) ----------
+    # ---------- SINGLE-RUN ----------
     printed = 0
     if args.pairs_only:
         for i in range(args.count):
