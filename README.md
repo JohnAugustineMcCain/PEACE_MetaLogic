@@ -306,82 +306,52 @@ Here’s a clean usage guide for your peace_gb_centered.py script, based on the 
 
 Generates a random even number with `D` digits and searches for a Goldbach decomposition using a multi-phase strategy:
 
-1. **Centered search** around `n/2`  
-2. **Adaptive search** (if enabled)  
+1. **Centered search** around `n/2`
+2. **Adaptive search** (if enabled)
 3. **Subtractor search** (subtracting primes)
 
----
-
-## Basic usage
-
-```bash
+## Basic Usage
 python3 peace_gb_centered.py --digits <D> [options]
-Key arguments
---digits <D>
-Number of decimal digits in the even numbers to test.
-Example:
 
-bash
-Copy code
+## Key Arguments
+
+* `--digits <D>` Number of decimal digits in the even numbers to test. Example:
 --digits 30
---count <N>
-How many random numbers to test at this digit size.
-Example:
 
-bash
-Copy code
+* `--count <N>` How many random numbers to test at this digit size. Example:
 --count 20
---seed <S>
-Random seed (default: 2025).
 
-Search phase options
-Centered search
---trials-center <N>: Max candidate draws around n/2.
+* `--seed <S>` Random seed (default: `2025`).
 
---window-center <W>: Window size around n/2.
+## Search Phase Options
 
-Adaptive search
---adaptive: Enable adaptive re-centering strategy.
+### Centered Search
+* `--trials-center <N>`: Max candidate draws around n/2
+* `--window-center <W>`: Window size around n/2
 
---trials-adapt <N>: Total trials budget for adaptive phase.
+### Adaptive Search
+* `--adaptive`: Enable adaptive re-centering strategy
+* `--trials-adapt <N>`: Total trials budget for adaptive phase
+* `--window-adapt <W>`: Window size for adaptive search
+* `--mini-batch <M>`: Trials per mini-batch during adaptive search
 
---window-adapt <W>: Window size for adaptive search.
+### Subtractor Search
+* `--subs-ceiling <N>`: Max prime subtractor to generate
+* `--subs-max-checks <N>`: Max primes to check before stopping
 
---mini-batch <M>: Trials per mini-batch during adaptive re-centering.
+## Modes & Outputs
 
-Subtractor search
---subs-ceiling <N>: Max prime subtractor to generate.
+* `--why` Prints rationale for the heuristic and exits.
+* `--examples <K>` Show *K* example decompositions from the highest digit size tested.
+* `--ci` Compute 95% confidence intervals for hit rates.
+* `--bayes-summary` Compute cumulative `log10` Bayes factor vs. a baseline hit-rate.
+* `--csv <file>` Save summary to a CSV file.
+* `--quiet` Suppress per-`n` detail output.
 
---subs-max-checks <N>: Max primes to check before stopping.
+## Sweep Mode
+--sweep start:end:step
 
-Modes and outputs
---why
-Prints a one-page rationale for the centered/adaptive/subtractor heuristic and exits.
-
---examples <K>
-Show K example decompositions from the highest digit size tested.
-
---ci
-Compute 95% confidence intervals (Wilson) for hit rates.
-
---bayes-summary
-Compute cumulative log10 Bayes factor vs. a baseline hit-rate model.
-
---csv <file>
-Save sweep results to a CSV file.
-
---quiet
-Suppress per-n output (summary only).
-
-Sweep mode
-Instead of --digits, you can run a sweep across multiple digit sizes:
-
-bash
-Copy code
---sweep <start:end:step>
-Example:
-
-bash
-Copy code
+**Example:**
 --sweep 24:60:4
+
 This tests 24-digit, 28-digit, 32-digit, …, 60-digit numbers.
