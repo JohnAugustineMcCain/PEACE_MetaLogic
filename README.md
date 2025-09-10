@@ -302,11 +302,7 @@ A meta-logical framework for reasoning about “unsolved” mathematical conject
 
 Here’s a clean usage guide for your peace_gb_centered.py script, based on the version you’re running now (with multi-phase search, sweep mode, CI, Bayes summary, and examples):
 
-## peace_gb_centered.py
-
-Basic usage
-python3 peace_gb_centered.py --digits <D> [options]
-
+Usage Guide: peace_gb_centered.py
 
 Generates a random even number with D digits and searches for a Goldbach decomposition using a multi-phase strategy:
 
@@ -316,15 +312,24 @@ Adaptive search (if enabled)
 
 Subtractor search (subtracting primes)
 
+Basic usage
+python3 peace_gb_centered.py --digits <D> [options]
+
 Key arguments
 
 --digits <D>
 Number of decimal digits in the even numbers to test.
-Example: --digits 30
+Example:
+
+--digits 30
+
 
 --count <N>
 How many random numbers to test at this digit size.
-Example: --count 20
+Example:
+
+--count 20
+
 
 --seed <S>
 Random seed (default: 2025).
@@ -385,4 +390,4 @@ Example:
 --sweep 24:60:4
 
 
-Tests 24d, 28d, 32d, …, 60d.
+This tests 24-digit, 28-digit, 32-digit, …, 60-digit numbers.
