@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 #
-# subs_gb_learn.py — Subtractor-only Goldbach finder
-# (learned band ordering + self-tuning wheel; one-direction search)
+# goldbach.py — Subtractor-only Goldbach finder
+# (learned band ordering + self-tuning wheel strength + one-direction search)
 #
 # - Deterministic ascending subtractors (p increasing)
-# - Self-tuning wheel residue prefilter (per digit, learns whether using the wheel is faster)
+# - Self-tuning wheel residue prefilter with adaptive *strength* k (how many wheel primes to use)
 # - Pre-sieve q with small primes before BPSW
 # - Early break at midpoint: only search one direction (stop when 2*p > n)
 # - Precomputed residue cache for p % r to avoid repeated mod
@@ -28,10 +28,6 @@ def _wilson_ci(h: int, n: int, z: float = 1.96) -> Tuple[float,float]:
     half = z*math.sqrt(p*(1-p)/n + z*z/(4*n*n))/denom
     return (max(0.0, center-half), min(1.0, center+half))
 
-def _ascii_bar(frac: float, width: int = 40) -> str:
-    n = max(0, min(width, int(round(frac * width))))
-    return "█"*n + "·"*(width-n)
-
 def random_even_with_digits(D: int, rng: random.Random) -> int:
     if D < 2: raise ValueError("digits must be >= 2")
     lo = 10**(D-1); hi = 10**D - 1
@@ -41,22 +37,6 @@ def random_even_with_digits(D: int, rng: random.Random) -> int:
     if n < lo: n = lo + (1 if lo % 2 else 0)
     if n % 2: n += 1
     return n
-
-def sieve_upto(limit: int) -> List[int]:
-    if limit < 2: return []
-    sieve = bytearray(b"\x01")*(limit+1)
-    sieve[0:2] = b"\x00\x00"
-    r = int(limit**0.5)
-    for p in range(2, r+1):
-        if sieve[p]:
-            start = p*p; step = p
-            sieve[start:limit+1:step] = b"\x00" * (((limit - start)//step) + 1)
-    return [i for i, b in enumerate(sieve) if b]
-
-def _median(vals: List[int]) -> Optional[int]:
-    if not vals: return None
-    s = sorted(vals); m = len(s)//2
-    return s[m] if len(s)%2 else (s[m-1]+s[m])//2
 
 # -------------------------- BPSW primality test --------------------------
 
@@ -136,18 +116,23 @@ def is_probable_prime(n: int) -> bool:
 
 # ---------------------- Residue filter & pre-sieve -----------------------
 
+def sieve_upto(limit: int) -> List[int]:
+    if limit < 2: return []
+    sieve = bytearray(b"\x01")*(limit+1)
+    sieve[0:2] = b"\x00\x00"
+    r = int(limit**0.5)
+    for p in range(2, r+1):
+        if sieve[p]:
+            start = p*p; step = p
+            sieve[start:limit+1:step] = b"\x00" * (((limit - start)//step) + 1)
+    return [i for i, b in enumerate(sieve) if b]
+
 def build_wheel_residues_for_n(n: int, wheel_primes: List[int]) -> Dict[int, int]:
-    """
-    Precompute n mod r for each small prime r in the 'wheel'.
-    For a candidate subtractor p, if p % r == n % r, then q=n-p ≡ 0 (mod r), so reject p.
-    """
+    # Precompute n mod r for each small wheel prime r (except 2).
     return {r: (n % r) for r in wheel_primes if r != 2}
 
 def q_pre_sieve(q: int, pre_primes: List[int]) -> bool:
-    """
-    Quick small-prime filter on q before BPSW.
-    Accept if q is itself one of the pre_primes, or coprime to all of them.
-    """
+    # Quick small-prime filter on q before BPSW.
     for r in pre_primes:
         if r >= q: break
         if q % r == 0:
@@ -172,15 +157,10 @@ def save_cache(path: str, data: Dict[str, Dict[str, List[int]]]) -> None:
     os.replace(tmp, path)
 
 def init_band_stats(num_bands: int) -> Dict[str, List[int]]:
-    # We track two integer arrays: trials[b], successes[b]
-    return {
-        "trials":   [0]*num_bands,
-        "successes":[0]*num_bands
-    }
+    return {"trials":[0]*num_bands, "successes":[0]*num_bands}
 
 def band_scores(trials: List[int], successes: List[int], smoothing: float = 1.0) -> List[float]:
-    # Expected CTR with Laplace smoothing: (succ + s)/(trials + 2s)
-    return [ (successes[b] + smoothing) / ( (trials[b] + 2.0*smoothing) ) for b in range(len(trials)) ]
+    return [(successes[b]+smoothing)/((trials[b]+2.0*smoothing)) for b in range(len(trials))]
 
 def apply_decay(stats: Dict[str, List[int]], decay: float) -> None:
     if decay >= 0.9999: return
@@ -188,98 +168,49 @@ def apply_decay(stats: Dict[str, List[int]], decay: float) -> None:
         for i, v in enumerate(stats[k]):
             stats[k][i] = int(round(v * decay))
 
+# --------------------- Adaptive wheel strength (k choices) ----------------
+
+def make_k_options(L: int) -> List[int]:
+    # Choose a small menu of wheel strengths; capped by L (wheel size)
+    opts = sorted(set([0, min(2, L), min(4, L), L]))
+    return opts
+
+def choose_k(stats: Dict[str, List[int]], k_opts: List[int], rng: random.Random, explore_eps: float = 0.05) -> int:
+    """
+    Multi-armed bandit over wheel strength k in k_opts.
+    Picks the k with smallest observed avg ms per trial; explores with prob eps.
+    """
+    # No history? Explore uniformly the first few times.
+    if rng.random() < explore_eps:
+        return rng.choice(k_opts)
+
+    trials = stats["wheel_trials_k"]   # parallel to k_opts
+    ms_sum = stats["wheel_ms_sum_k"]
+
+    best_k = k_opts[0]
+    best_metric = float('inf')
+    for i, k in enumerate(k_opts):
+        t = trials[i]
+        if t > 0:
+            m = ms_sum[i] / t  # avg ms per attempt
+        else:
+            # Encourage trying unseen arms slightly; prefer smaller k first (closer to subtractors)
+            m = 1e6 - 1e3 * i
+        if m < best_metric:
+            best_metric = m
+            best_k = k
+    return best_k
+
 # ------------------------- Core search procedure ------------------------
-
-def search_subtractor_learned(
-    n: int,
-    primes: List[int],
-    *,
-    max_checks: int,
-    wheel_primes: List[int],
-    pre_primes: List[int],
-    band_size: int,
-    band_order: List[int],
-    res_cache: Dict[int, List[int]],   # r -> [p % r for all p]
-    rng: random.Random
-) -> Tuple[bool, int, Optional[int]]:
-    """
-    (Kept for reference.) Band-ordered subtractor loop with wheel filter.
-    Returns (found, checks_used, hit_band_index or None).
-    """
-    if n % 2 or n < 4:
-        return False, 0, None
-
-    n_mod = build_wheel_residues_for_n(n, wheel_primes)
-    checks = 0
-    total_items = len(primes)
-
-    for b in band_order:
-        start = b * band_size
-        end   = min(start + band_size, total_items)
-        if start >= end:
-            continue
-        for idx in range(start, end):
-            p = primes[idx]
-            # one-direction early break: stop once p > q  <=>  2*p > n
-            if p * 2 > n:
-                return False, checks, None
-            # wheel prefilter
-            wheel_ok = True
-            for r, nr in n_mod.items():
-                if res_cache[r][idx] == nr:
-                    wheel_ok = False; break
-            if not wheel_ok:
-                continue
-            q = n - p
-            # presieve
-            if not q_pre_sieve(q, pre_primes):
-                checks += 1
-                if checks >= max_checks:
-                    return False, checks, None
-                continue
-            # BPSW
-            checks += 1
-            if is_probable_prime(q):
-                return True, checks, b
-            if checks >= max_checks:
-                return False, checks, None
-
-    return False, checks, None
-
-# ------------------------------- CLI bits --------------------------------
-
-def _parse_sweep(s: str) -> List[int]:
-    try:
-        a, b, c = [int(x) for x in s.split(":")]
-        if c == 0: raise ValueError
-        rng = range(a, b + (1 if c > 0 else -1), c)
-        out = [v for v in rng if v > 0]
-        if not out: raise ValueError
-        return out
-    except Exception:
-        raise argparse.ArgumentTypeError(f"--sweep must be 'start:end:step' (got {s!r})")
-
-def rationale() -> str:
-    return (
-        "\n*** Subtractor-only Goldbach (learned bands + self-tuning wheel + one-direction) ***\n\n"
-        "Given even n, we try ascending subtractor primes p so that q=n-p is prime.\n"
-        "Speedups:\n"
-        "  • Self-tuning wheel residue prefilter (richer default) learns per-digit whether to use it.\n"
-        "  • Pre-sieve q by many small primes before BPSW.\n"
-        "  • One-direction early break at midpoint (stop when 2*p > n).\n"
-        "  • Precomputed residues p % r once per wheel prime.\n"
-        "  • Learned band ordering (per-digit).\n"
-        "Any reported hit is validated by BPSW (Baillie–PSW primality test).\n"
-    )
 
 def main() -> None:
     ap = argparse.ArgumentParser(
-        prog="subs-gb-learn",
-        description="Subtractor-only Goldbach with learned ordering + self-tuning wheel + one-direction search."
+        prog="goldbach",
+        description="Goldbach decompositions with learned ordering + adaptive wheel strength + one-direction search."
     )
     ap.add_argument("--digits", type=int, help="Single digit size (mutually exclusive with --sweep).")
     ap.add_argument("--count", type=int, default=10, help="How many n for single-run (default 10).")
-    ap.add_argument("--sweep", type=_parse_sweep, default=None, help="Range 'start:end:step' for digit sweep.")
+    ap.add_argument("--sweep", type=lambda s: _parse_sweep(s), default=None, help="Range 'start:end:step' for digit sweep.")
     ap.add_argument("--samples", type=int, default=100, help="How many n per digit in sweep (default 100).")
     ap.add_argument("--seed", type=int, default=2025, help="Random seed (default 2025).")
     ap.add_argument("--quiet", action="store_true", help="Suppress per-n prints; show only summary rows.")
@@ -315,18 +246,22 @@ def main() -> None:
 
     rng = random.Random(args.seed)
 
-    # Prepare subtractor primes (ascending, deterministic, odd)
+    # Prepare subtractor primes
     subtractor_primes = [p for p in sieve_upto(args.subs_ceiling) if p % 2 == 1 and p != 1]
 
-    # Precompute residues p % r once for each wheel prime
+    # Build wheel list
     wheel_list: List[int] = []
     for tok in args.wheel_primes.split(","):
-        v = int(tok.strip())
+        v = int(tok.strip()); 
         if v <= 2: continue
         wheel_list.append(v)
+    W = len(wheel_list)
+    k_opts = make_k_options(W)  # e.g., [0,2,4,8] for default list length 8
+
+    # Precompute residues p % r once for each wheel prime
     res_cache: Dict[int, List[int]] = {r: [p % r for p in subtractor_primes] for r in wheel_list}
 
-    # Prepare pre-sieve primes for q (exclude 2; keep odd primes)
+    # Pre-sieve primes (exclude 2; keep odd primes)
     pre_primes = [p for p in sieve_upto(args.pre_sieve_limit) if p >= 3]
 
     # Band partition info
@@ -341,6 +276,7 @@ def main() -> None:
         key = str(D)
         if key not in cache:
             cache[key] = {}
+        # Bands
         if "trials" not in cache[key] or "successes" not in cache[key]:
             cache[key]["trials"] = [0]*num_bands
             cache[key]["successes"] = [0]*num_bands
@@ -351,25 +287,39 @@ def main() -> None:
                 arr.extend([0]*(num_bands - len(arr)))
             elif len(arr) > num_bands:
                 cache[key][k] = arr[:num_bands]
-        # Self-tuning wheel stats (index 0=no-wheel, 1=wheel)
-        if "wheel_trials" not in cache[key]:
-            cache[key]["wheel_trials"] = [0, 0]
-        if "wheel_ms_sum" not in cache[key]:
-            cache[key]["wheel_ms_sum"] = [0.0, 0.0]
-        if "wheel_checks_sum" not in cache[key]:
-            cache[key]["wheel_checks_sum"] = [0, 0]
+        # Adaptive wheel strength stats parallel to k_opts
+        if "k_opts" not in cache[key] or cache[key]["k_opts"] != k_opts:
+            cache[key]["k_opts"] = k_opts
+            cache[key]["wheel_trials_k"] = [0]*len(k_opts)
+            cache[key]["wheel_ms_sum_k"] = [0.0]*len(k_opts)
+            cache[key]["wheel_checks_sum_k"] = [0]*len(k_opts)
+        elif "wheel_trials_k" not in cache[key]:
+            cache[key]["wheel_trials_k"] = [0]*len(k_opts)
+            cache[key]["wheel_ms_sum_k"] = [0.0]*len(k_opts)
+            cache[key]["wheel_checks_sum_k"] = [0]*len(k_opts)
         return cache[key]
 
+    def rationale() -> str:
+        return (
+            "\n*** Goldbach (learned bands + adaptive wheel strength + one-direction) ***\n\n"
+            "Given even n, try ascending subtractor primes p so that q=n-p is prime.\n"
+            "Speedups:\n"
+            "  • Adaptive wheel strength: uses the first k wheel primes (k self-tunes per digit).\n"
+            "  • Pre-sieve q by small primes before BPSW.\n"
+            "  • Early break at midpoint: stop when 2*p > n (one-direction only).\n"
+            "  • Learned band ordering with per-digit CTR stats (zero hot-loop overhead).\n"
+            "Any hit is validated by BPSW (Baillie–PSW primality test).\n"
+        )
+
     def apply_decay_all(stats: Dict[str, List[int]]) -> None:
-        # Decay band stats
         apply_decay({"trials": stats["trials"], "successes": stats["successes"]}, max(0.0, min(1.0, args.decay)))
-        # Decay wheel stats smoothly
         d = max(0.0, min(1.0, args.decay))
         if d < 0.9999:
-            for i in (0,1):
-                stats["wheel_trials"][i] = int(round(stats["wheel_trials"][i] * d))
-                stats["wheel_ms_sum"][i] *= d
-                stats["wheel_checks_sum"][i] = int(round(stats["wheel_checks_sum"][i] * d))
+            for name in ("wheel_trials_k","wheel_ms_sum_k","wheel_checks_sum_k"):
+                if "wheel_ms" in name:
+                    stats[name] = [v*d for v in stats[name]]
+                else:
+                    stats[name] = [int(round(v*d)) for v in stats[name]]
 
     def band_scores_for(D: int) -> Tuple[List[int], Dict[str, List[int]]]:
         stats = get_stats_for_digits(D)
@@ -385,32 +335,6 @@ def main() -> None:
         if hit_band is not None:
             stats["successes"][hit_band] += 1
 
-    def choose_wheel(stats: Dict[str, List[int]], rng: random.Random, explore_eps: float = 0.05) -> int:
-        """
-        Return 0 for no-wheel, 1 for wheel.
-        Chooses the option with lower observed avg ms per trial (fallback to checks),
-        with small epsilon exploration to keep learning.
-        """
-        if rng.random() < explore_eps:
-            return rng.choice([0,1])
-
-        wt = stats["wheel_trials"]
-        ms = stats["wheel_ms_sum"]
-        ck = stats["wheel_checks_sum"]
-
-        def metric(i: int) -> float:
-            if wt[i] > 0:
-                return ms[i] / wt[i]
-            # If no timing yet, use checks as a proxy; larger is worse
-            if wt[1-i] > 0:
-                return (ck[i] / max(1, wt[i])) if wt[i] > 0 else float('inf')
-            # No data at all: prefer wheel initially (usually beneficial)
-            return 0.0 if i == 1 else 1e9
-
-        m0 = metric(0)
-        m1 = metric(1)
-        return 0 if m0 < m1 else 1
-
     def run_for_digits(D: int, trials: int) -> Tuple[int,int,List[int],List[float]]:
         hits = 0
         checks_on_hits: List[int] = []
@@ -422,9 +346,11 @@ def main() -> None:
             n = random_even_with_digits(D, rng)
             visited_band_trials: Dict[int, int] = {}
 
-            # Decide per-n whether to use wheel (self-tuning)
-            use_wheel = choose_wheel(stats, rng)  # 0=no-wheel, 1=wheel
-            n_mod = build_wheel_residues_for_n(n, wheel_list) if use_wheel else {}
+            # Choose wheel strength k for this n (self-tuned per digit)
+            k = choose_k(stats, k_opts, rng)  # k in k_opts, number of wheel primes to use
+            use_wheel = k > 0
+            # Precompute n_mod only for the first k wheel primes (so k=0 -> empty dict)
+            n_mod = build_wheel_residues_for_n(n, wheel_list[:k]) if use_wheel else {}
 
             checks_total = 0
             found = False
@@ -450,7 +376,7 @@ def main() -> None:
                             hit_band = None
                             break
 
-                        # Wheel prefilter if enabled
+                        # Wheel prefilter if enabled (only first k primes)
                         if use_wheel:
                             wheel_ok = True
                             for r, nr in n_mod.items():
@@ -490,11 +416,11 @@ def main() -> None:
 
             elapsed_ms = (time.perf_counter() - t0) * 1000.0
 
-            # Update self-tuning stats (count every trial, hit or miss)
-            mode = 1 if use_wheel else 0
-            stats["wheel_trials"][mode] += 1
-            stats["wheel_ms_sum"][mode] += elapsed_ms
-            stats["wheel_checks_sum"][mode] += checks_total
+            # Update self-tuning stats for the chosen k
+            i = k_opts.index(k)
+            stats["wheel_trials_k"][i] += 1
+            stats["wheel_ms_sum_k"][i] += elapsed_ms
+            stats["wheel_checks_sum_k"][i] += checks_total
 
             if found:
                 hits += 1
@@ -513,7 +439,7 @@ def main() -> None:
             print("\n# Learned subtractor-only sweep")
             print(f"# subs_ceiling={args.subs_ceiling} | subs_max_checks={args.subs_max_checks}")
             print(f"# wheel={wheel_list} | pre_sieve_limit={args.pre_sieve_limit}")
-            print(f"# band_size={band_size} | cache={args.cache_file} | decay={args.decay} | smoothing={args.smoothing}")
+            print(f"# band_size={args.band_size} | cache={args.cache_file} | decay={args.decay} | smoothing={args.smoothing}")
             print(f"# samples per digit={args.samples} | seed={args.seed}\n")
 
         for D in digits_space:
@@ -547,7 +473,7 @@ def main() -> None:
                 "subs_max_checks": args.subs_max_checks,
                 "wheel_primes": ",".join(map(str, wheel_list)),
                 "pre_sieve_limit": args.pre_sieve_limit,
-                "band_size": band_size,
+                "band_size": args.band_size,
                 "cache_file": args.cache_file,
                 "decay": args.decay,
                 "smoothing": args.smoothing,
@@ -570,9 +496,9 @@ def main() -> None:
         print(rationale()); raise SystemExit("Provide --digits or --sweep. Use --why for the rationale.")
 
     D = args.digits
-    print(f"# Subtractor-only (LEARNED + AUTO-WHEEL + ONE-DIR) | D={D} | count={args.count} | seed={args.seed}")
+    print(f"# Goldbach | D={D} | count={args.count} | seed={args.seed}")
     print(f"# subs_ceiling={args.subs_ceiling} | subs_max_checks={args.subs_max_checks} "
-          f"| wheel={wheel_list} | pre_sieve_limit={args.pre_sieve_limit} | band_size={band_size} | cache={args.cache_file}")
+          f"| wheel={wheel_list} | pre_sieve_limit={args.pre_sieve_limit} | band_size={args.band_size} | cache={args.cache_file}")
     hits, total, checks_on_hits, ms_on_hits = run_for_digits(D, args.count)
     rate = hits/total if total else 0.0
     avg_checks = (sum(checks_on_hits)/len(checks_on_hits)) if checks_on_hits else None
@@ -587,6 +513,18 @@ def main() -> None:
     else:
         print(f"avg_checks_to_hit={avg_checks_txt}  avg_ms_per_hit={avg_ms_txt}")
 
+# ------------------------------- Utilities --------------------------------
+
+def _parse_sweep(s: str) -> List[int]:
+    try:
+        a, b, c = [int(x) for x in s.split(":")]
+        if c == 0: raise ValueError
+        rng = range(a, b + (1 if c > 0 else -1), c)
+        out = [v for v in rng if v > 0]
+        if not out: raise ValueError
+        return out
+    except Exception:
+        raise argparse.ArgumentTypeError(f"--sweep must be 'start:end:step' (got {s!r})")
 
 if __name__ == "__main__":
     main()
