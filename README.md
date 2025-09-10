@@ -355,3 +355,120 @@ python3 peace_gb_centered.py --digits <D> [options]
 --sweep 24:60:4
 
 This tests 24-digit, 28-digit, 32-digit, …, 60-digit numbers.
+
+
+# Junk I want to keep
+```
+Awesome — here’s a clean, copy-pasteable “training playbook” to get your learner warmed up and the cache populated.
+
+0) One-time setup (folders + fresh cache)
+mkdir -p logs results
+rm -f subs_learn_cache.json   # start from scratch
+
+1) Warm-start the band learner across digit bands
+
+This uses subs_gb_learn.py to sweep many digit sizes and update the cache quickly.
+
+# Pass A: small→mid digits (fast)
+nohup python3 subs_gb_learn.py --sweep 24:60:2 \
+  --samples 800 --subs-ceiling 300000 --subs-max-checks 500 \
+  --pre-sieve-limit 20000 --band-size 64 \
+  --decay 0.997 --smoothing 1.2 --ci \
+  --csv results/train_learn_24_60.csv \
+  > logs/train_learn_24_60.out 2>&1 &
+
+# Pass B: mid→large digits
+nohup python3 subs_gb_learn.py --sweep 62:120:2 \
+  --samples 600 --subs-ceiling 300000 --subs-max-checks 750 \
+  --pre-sieve-limit 20000 --band-size 64 \
+  --decay 0.997 --smoothing 1.2 --ci \
+  --csv results/train_learn_62_120.csv \
+  > logs/train_learn_62_120.out 2>&1 &
+
+# Pass C: larger digits
+nohup python3 subs_gb_learn.py --sweep 122:200:2 \
+  --samples 400 --subs-ceiling 300000 --subs-max-checks 1000 \
+  --pre-sieve-limit 20000 --band-size 64 \
+  --decay 0.997 --smoothing 1.2 --ci \
+  --csv results/train_learn_122_200.csv \
+  > logs/train_learn_122_200.out 2>&1 &
+
+
+Watch any job’s progress:
+
+tail -f logs/train_learn_24_60.out
+
+
+These three passes alone will fill subs_learn_cache.json with per-digit band stats learned from ~1.8k samples per digit range — fast, and zero hot-loop overhead.
+
+2) Auto-tune the meta-parameters (band size, wheel, pre-sieve, max checks)
+
+Now let gb_auto.py explore the hyper-params and log per-iteration timings.
+
+Option A — one target digit (e.g., 100 digits)
+nohup python3 gb_auto.py --digits 100 --samples 300 --iterations 20 --ci \
+  --decay 0.995 --smoothing 1.5 \
+  --csv results/auto_100d.csv \
+  > logs/auto_100d.out 2>&1 &
+
+tail -f logs/auto_100d.out
+
+Option B — several anchors (transfer learning across sizes)
+# 80d anchor
+nohup python3 gb_auto.py --digits 80 --samples 300 --iterations 16 --ci \
+  --decay 0.996 --smoothing 1.4 \
+  --csv results/auto_80d.csv \
+  > logs/auto_80d.out 2>&1 &
+
+# 120d anchor
+nohup python3 gb_auto.py --digits 120 --samples 300 --iterations 16 --ci \
+  --decay 0.996 --smoothing 1.4 \
+  --csv results/auto_120d.csv \
+  > logs/auto_120d.out 2>&1 &
+
+# 160d anchor
+nohup python3 gb_auto.py --digits 160 --samples 250 --iterations 16 --ci \
+  --decay 0.996 --smoothing 1.4 \
+  --csv results/auto_160d.csv \
+  > logs/auto_160d.out 2>&1 &
+
+
+gb_auto.py will print per-iteration time, hit-rate, avg checks, and the chosen config (B, L, M, W). It also updates the same subs_learn_cache.json, so learning compounds.
+
+3) Consolidation pass (optional but nice)
+
+After auto-tuning, do one more broad subs_gb_learn.py sweep to reinforce the learned band ordering with the best hyper-params you saw in gb_auto.py (adjust the flags accordingly):
+
+nohup python3 subs_gb_learn.py --sweep 24:200:2 \
+  --samples 500 --subs-ceiling 300000 --subs-max-checks 750 \
+  --pre-sieve-limit 20000 --band-size 64 \
+  --decay 0.998 --smoothing 1.0 --ci \
+  --csv results/train_learn_consolidated.csv \
+  > logs/train_learn_consolidated.out 2>&1 &
+
+4) Sanity-check / validation (fresh seed, no tuning)
+
+Use a different seed and record CSV for human review:
+
+python3 subs_gb_learn.py --sweep 80:120:2 \
+  --samples 400 --subs-ceiling 300000 --subs-max-checks 750 \
+  --pre-sieve-limit 20000 --band-size 64 \
+  --decay 1.0 --smoothing 1.0 --ci --seed 777 \
+  --csv results/validate_80_120_seed777.csv
+
+Notes & tips
+
+Resume-friendly: All runs update subs_learn_cache.json incrementally. No harm in stopping/starting; learning persists.
+
+Clean retrain: If you want a brand-new training cycle, just rm subs_learn_cache.json first.
+
+Parallelism: If you have cores to spare, you can launch the separate ranges/anchors concurrently (as above). They all write to the same cache; that’s fine on a single machine since writes are atomic (via temporary file + replace).
+
+Where’s the “training”?
+
+subs_gb_learn.py “trains” the band order per digit (CTR stats).
+
+gb_auto.py tunes hyperparameters (band size, wheel, pre-sieve limit, max checks) and logs iteration timings.
+```
+
+
