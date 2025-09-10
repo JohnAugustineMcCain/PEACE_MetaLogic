@@ -201,6 +201,20 @@ def choose_k(stats: Dict[str, List[int]], k_opts: List[int], rng: random.Random,
             best_k = k
     return best_k
 
+# --------------------------- Rationale (moved up) ---------------------------
+
+def rationale() -> str:
+    return (
+        "\n*** Goldbach (learned bands + adaptive wheel strength + one-direction) ***\n\n"
+        "Given even n, try ascending subtractor primes p so that q=n-p is prime.\n"
+        "Speedups:\n"
+        "  • Adaptive wheel strength: uses the first k wheel primes (k self-tunes per digit).\n"
+        "  • Pre-sieve q by small primes before BPSW.\n"
+        "  • Early break at midpoint: stop when 2*p > n (one-direction only).\n"
+        "  • Learned band ordering with per-digit CTR stats (zero hot-loop overhead).\n"
+        "Any hit is validated by BPSW (Baillie–PSW primality test).\n"
+    )
+
 # ------------------------- Core search procedure ------------------------
 
 def main() -> None:
@@ -249,11 +263,15 @@ def main() -> None:
     # Prepare subtractor primes
     subtractor_primes = [p for p in sieve_upto(args.subs_ceiling) if p % 2 == 1 and p != 1]
 
-    # Build wheel list
+    # Build wheel list (defensive parsing)
     wheel_list: List[int] = []
     for tok in args.wheel_primes.split(","):
-        v = int(tok.strip()); 
-        if v <= 2: continue
+        tok = tok.strip()
+        if not tok:
+            continue
+        v = int(tok)
+        if v <= 2:
+            continue
         wheel_list.append(v)
     W = len(wheel_list)
     k_opts = make_k_options(W)  # e.g., [0,2,4,8] for default list length 8
@@ -298,18 +316,6 @@ def main() -> None:
             cache[key]["wheel_ms_sum_k"] = [0.0]*len(k_opts)
             cache[key]["wheel_checks_sum_k"] = [0]*len(k_opts)
         return cache[key]
-
-    def rationale() -> str:
-        return (
-            "\n*** Goldbach (learned bands + adaptive wheel strength + one-direction) ***\n\n"
-            "Given even n, try ascending subtractor primes p so that q=n-p is prime.\n"
-            "Speedups:\n"
-            "  • Adaptive wheel strength: uses the first k wheel primes (k self-tunes per digit).\n"
-            "  • Pre-sieve q by small primes before BPSW.\n"
-            "  • Early break at midpoint: stop when 2*p > n (one-direction only).\n"
-            "  • Learned band ordering with per-digit CTR stats (zero hot-loop overhead).\n"
-            "Any hit is validated by BPSW (Baillie–PSW primality test).\n"
-        )
 
     def apply_decay_all(stats: Dict[str, List[int]]) -> None:
         apply_decay({"trials": stats["trials"], "successes": stats["successes"]}, max(0.0, min(1.0, args.decay)))
