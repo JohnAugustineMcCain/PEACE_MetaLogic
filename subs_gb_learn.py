@@ -476,11 +476,10 @@ def main() -> None:
             rate = hits/total if total else 0.0
             avg_checks = (sum(checks_on_hits)/len(checks_on_hits)) if checks_on_hits else None
             lo95, hi95 = _wilson_ci(hits, total) if args.ci else (None, None)
-            bar = _ascii_bar(rate)
 
             ci_txt = f"  CI95=[{lo95:.3f},{hi95:.3f}]" if args.ci else ""
-            print(f"{D:>3}d  hit_rate={rate:6.3f}{ci_txt}  avg_checks_to_hit={('%.1f'%avg_checks) if avg_checks is not None else '—':>6}  {bar}")
-
+            print(f"{D:>3}d  hit_rate={rate:6.3f}{ci_txt}  avg_checks_to_hit={('%.1f'%avg_checks) if avg_checks is not None else '—':>6}")
+            
             row = {
                 "digits": D,
                 "samples": total,
