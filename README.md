@@ -299,3 +299,90 @@ A meta-logical framework for reasoning about “unsolved” mathematical conject
   - 2–4 simple heuristics returning `p ∈ [0,1]`,  
   - a sensible bucket key for stability.  
 - Everything else (calibration, PIT, earned confidence, verdicting) stays the same.
+
+Here’s a clean usage guide for your peace_gb_centered.py script, based on the version you’re running now (with multi-phase search, sweep mode, CI, Bayes summary, and examples):
+
+## peace_gb_centered.py
+
+Basic usage
+python3 peace_gb_centered.py --digits <D> [options]
+
+
+Generates a random even number with D digits and searches for a Goldbach decomposition using a multi-phase strategy:
+
+Centered search around n/2
+
+Adaptive search (if enabled)
+
+Subtractor search (subtracting primes)
+
+Key arguments
+
+--digits <D>
+Number of decimal digits in the even numbers to test.
+Example: --digits 30
+
+--count <N>
+How many random numbers to test at this digit size.
+Example: --count 20
+
+--seed <S>
+Random seed (default: 2025).
+
+Search phase options
+
+Centered search
+
+--trials-center <N>: Max candidate draws around n/2.
+
+--window-center <W>: Window size around n/2.
+
+Adaptive search
+
+--adaptive: Enable adaptive re-centering strategy.
+
+--trials-adapt <N>: Candidate draws per adaptive round.
+
+--window-adapt <W>: Window size for adaptive search.
+
+--mini-batch <M>: Batch size for adaptive re-centering.
+
+Subtractor search
+
+--subs-ceiling <N>: Max prime subtractor to generate.
+
+--subs-max-checks <N>: Max primes to check before stopping.
+
+Modes and outputs
+
+--why
+Prints a one-page rationale for the centered heuristic and exits.
+
+--examples <K>
+Show K example decompositions from the highest digit size tested.
+
+--ci
+Compute 95% confidence intervals for hit rates.
+
+--bayes-summary
+Compute Bayes factor vs. a baseline hit-rate model.
+
+--csv <file>
+Save all sweep results to a CSV file.
+
+--quiet
+Suppress individual pair outputs (summary only).
+
+Sweep mode
+
+Instead of --digits, you can run a sweep across multiple digit sizes:
+
+--sweep <start:end:step>
+
+
+Example:
+
+--sweep 24:60:4
+
+
+Tests 24d, 28d, 32d, …, 60d.
