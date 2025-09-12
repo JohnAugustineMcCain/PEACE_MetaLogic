@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 #
-# gbopt.py — Subtractor-only Goldbach finder (per-n adaptive)
+# gbopt.py — Subtractor-only Goldbach finder (per-n adaptive + small-sub pre-pass)
 #   - Per-n (signature) adaptive wheel strength k
 #   - Per-n (signature) adaptive pre-sieve length L + globally learned sieve order
+#   - Consistent small-subtractors pre-pass to catch quick wins
 #   - Deterministic ascending subtractors (p increasing)
 #   - Pre-sieve q with small primes before BPSW
 #   - Early break at midpoint: one-direction search (stop when 2*p > n)
@@ -15,7 +16,7 @@
 
 from __future__ import annotations
 import argparse, math, random, csv, json, os, time, hashlib
-from typing import List, Tuple, Optional, Dict, Any
+from typing import List, Tuple, Optional, Dict, Any, Set
 
 # ----------------------------- Small helpers -----------------------------
 
@@ -193,16 +194,12 @@ def choose_arm(trials: List[int], ms_sum: List[float], arms: List[int], rng: ran
 
 def signature_of_n(n: int, sig_primes: List[int], extra_bits: int=10) -> str:
     """
-    Cheap per-n signature:
-      - residues mod selected small primes (>=3)
-      - low bits modulo 2**extra_bits (captures some power-of-two structure)
-    Returned as a compact string key; can be feature-hashed if desired.
+    Cheap per-n signature from residues and a few low bits; hashed to keep keyspace modest.
     """
     parts = [f"m{p}={n%p}" for p in sig_primes if p>=3]
     mask = (1<<extra_bits)-1
     parts.append(f"b2={n & mask}")
     raw = "|".join(parts)
-    # Feature-hash to keep key space modest and JSON-friendly
     h = hashlib.blake2b(raw.encode(), digest_size=6).hexdigest()
     return f"sig:{h}"
 
@@ -210,12 +207,13 @@ def signature_of_n(n: int, sig_primes: List[int], extra_bits: int=10) -> str:
 
 def rationale() -> str:
     return (
-        "\n*** Goldbach (per-n adaptive wheels) ***\n\n"
+        "\n*** Goldbach (per-n adaptive wheels + small-sub pre-pass) ***\n\n"
         "Given even n, try ascending subtractor primes p so that q=n-p is prime.\n"
         "Speedups:\n"
-        "  • Per-n adaptive wheel strength (k) chosen by a residue signature of n.\n"
+        "  • Per-n adaptive wheel strength (k) via residue-based signature of n.\n"
         "  • Pre-sieve has its own adaptive 'wheel': per-n choice of length L and\n"
         "    a globally learned order of small primes ranked by observed kill-rate.\n"
+        "  • Consistent small-subtractors pre-pass to catch lucky small-p hits.\n"
         "  • Early break at midpoint: stop when 2*p > n (one-direction only).\n"
         "  • Learned band ordering with per-digit CTR stats (zero hot-loop overhead).\n"
         "Any hit is validated by BPSW (Baillie–PSW primality test).\n"
@@ -224,7 +222,7 @@ def rationale() -> str:
 def main() -> None:
     ap = argparse.ArgumentParser(
         prog="gbopt",
-        description="Goldbach decompositions with per-n adaptive wheels and learned ordering."
+        description="Goldbach decompositions with per-n adaptive wheels, small-sub pre-pass, and learned ordering."
     )
     ap.add_argument("--digits", type=int, help="Single digit size (mutually exclusive with --sweep).")
     ap.add_argument("--count", type=int, default=10, help="How many n for single-run (default 10).")
@@ -242,6 +240,12 @@ def main() -> None:
     ap.add_argument("--subs-max-checks", type=int, default=2000,
                     help="Max subtractor primes to examine per n (after wheel filtering) (default 2000).")
 
+    # Small-sub pre-pass
+    ap.add_argument("--small-subs-first", type=int, default=64,
+                    help="Try the first N subtractor primes before bands (default 64).")
+    ap.add_argument("--small-subs-ceiling", type=int, default=0,
+                    help="If >0, pre-scan all subtractor primes p ≤ ceiling (overrides --small-subs-first).")
+
     # Wheels & sieve config
     ap.add_argument("--wheel-primes", type=str, default="3,5,7,11,13,17,19,23",
                     help="Comma-separated small primes for residue wheel.")
@@ -256,7 +260,7 @@ def main() -> None:
 
     # Cache / learning parameters
     ap.add_argument("--cache-file", type=str, default="subs_learn_cache.json",
-                    help="Path to JSON cache (will be extended for per-n buckets).")
+                    help="Path to JSON cache (extended for signature buckets).")
     ap.add_argument("--decay", type=float, default=1.0,
                     help="Per-run multiplicative decay for stats (e.g., 0.99). Default 1.0 = no decay.")
     ap.add_argument("--smoothing", type=float, default=1.0,
@@ -292,7 +296,8 @@ def main() -> None:
     # Pre-sieve base primes (exclude 2; keep odd primes), and initialize global order/stats
     pre_primes_full = [p for p in sieve_upto(args.pre_sieve_limit) if p >= 3]
     max_track = min(args.sieve_max_order, len(pre_primes_full))
-    # global learned order state lives in cache["global_sieve"]
+
+    # Band partition info
     band_size = max(1, args.band_size)
     total_items = len(subtractor_primes)
     num_bands = (total_items + band_size - 1) // band_size
@@ -301,19 +306,16 @@ def main() -> None:
     cache: Dict[str, Any] = load_cache(args.cache_file)
     if "global_sieve" not in cache:
         cache["global_sieve"] = {
-            "order": pre_primes_full[:max_track],       # start with natural order
-            "trials": [0]*max_track,                    # how often each prime tested
-            "kills": [0]*max_track,                     # how often it divided q
+            "order": pre_primes_full[:max_track],
+            "trials": [0]*max_track,
+            "kills": [0]*max_track,
         }
     else:
-        # sanitize if pre_sieve_limit changed
         g = cache["global_sieve"]
-        # rebuild order vector to be a subset of current pre_primes_full, preserving learned ranking
         current_set = set(pre_primes_full)
         learned = [p for p in g.get("order", []) if p in current_set]
         tail = [p for p in pre_primes_full if p not in learned]
         new_order = (learned + tail)[:max_track]
-        # re-dimension stats
         old_index = {p:i for i,p in enumerate(g.get("order", []))}
         trials = [0]*len(new_order); kills = [0]*len(new_order)
         for i,p in enumerate(new_order):
@@ -328,7 +330,6 @@ def main() -> None:
     def get_digit_stats(D: int) -> Dict[str, Any]:
         dkey = str(D)
         entry = cache["digits"].setdefault(dkey, {})
-        # bands
         if "trials" not in entry or "successes" not in entry:
             entry["trials"] = [0]*num_bands
             entry["successes"] = [0]*num_bands
@@ -342,7 +343,6 @@ def main() -> None:
     if "sig_buckets" not in cache: cache["sig_buckets"] = {}
     def get_sig_stats(sig: str, k_opts: List[int], L_opts: List[int]) -> Dict[str, Any]:
         sb = cache["sig_buckets"].setdefault(sig, {})
-        # k bandit
         if sb.get("k_opts") != k_opts:
             sb["k_opts"] = list(k_opts)
             sb["k_trials"] = [0]*len(k_opts)
@@ -352,7 +352,6 @@ def main() -> None:
             if "k_trials" not in sb: sb["k_trials"] = [0]*len(k_opts)
             if "k_ms_sum" not in sb: sb["k_ms_sum"] = [0.0]*len(k_opts)
             if "k_checks_sum" not in sb: sb["k_checks_sum"] = [0]*len(k_opts)
-        # L bandit
         if sb.get("L_opts") != L_opts:
             sb["L_opts"] = list(L_opts)
             sb["L_trials"] = [0]*len(L_opts)
@@ -367,27 +366,22 @@ def main() -> None:
     def decay_all(decay: float) -> None:
         d = max(0.0, min(1.0, decay))
         if d >= 0.9999: return
-        # digit bands
         for entry in cache["digits"].values():
             entry["trials"] = apply_decay_vec(entry["trials"], d, as_int=True)
             entry["successes"] = apply_decay_vec(entry["successes"], d, as_int=True)
-        # signature buckets
         for sb in cache["sig_buckets"].values():
             for name in ("k_trials","k_checks_sum","L_trials","L_checks_sum"):
                 if name in sb: sb[name] = apply_decay_vec(sb[name], d, as_int=True)
             for name in ("k_ms_sum","L_ms_sum"):
                 if name in sb: sb[name] = apply_decay_vec(sb[name], d, as_int=False)
-        # global sieve
         g = cache["global_sieve"]
         g["trials"] = apply_decay_vec(g["trials"], d, as_int=True)
         g["kills"]  = apply_decay_vec(g["kills"], d, as_int=True)
 
-    # Pre-sieve L options depend on available primes
     L_opts = make_L_options(len(cache["global_sieve"]["order"]))
 
     def band_scores_for(D: int) -> Tuple[List[int], Dict[str, Any]]:
         entry = get_digit_stats(D)
-        # decay once per outer call
         decay_all(args.decay)
         sc = band_scores(entry["trials"], entry["successes"], smoothing=max(0.0, args.smoothing))
         order = list(range(num_bands))
@@ -399,6 +393,73 @@ def main() -> None:
             entry["trials"][b] += int(t)
         if hit_band is not None:
             entry["successes"][hit_band] += 1
+
+    # --------------- Small-subtractors pre-pass (new) ----------------
+
+    def small_subs_indices() -> List[int]:
+        if args.small-subs-ceiling is not None:  # placeholder to avoid lint
+            pass
+        if args.small_subs_ceiling > 0:
+            # all primes p <= ceiling
+            cut = args.small_subs_ceiling
+            return [i for i,p in enumerate(subtractor_primes) if p <= cut]
+        # otherwise first N primes
+        N = max(0, min(args.small_subs_first, len(subtractor_primes)))
+        return list(range(N))
+
+    def small_subs_scan(n: int, tried: Set[int], n_mod: Dict[int,int], use_wheel: bool,
+                        sieve_order: List[int], gstate: Dict[str, Any],
+                        subs_max_checks: int) -> Tuple[bool,int]:
+        """
+        Try a small, fixed set of tiny p first. Updates global sieve stats.
+        Returns (found, checks_used). Does NOT update per-digit band stats.
+        """
+        checks = 0
+        order = small_subs_indices()
+        for idx in order:
+            if idx in tried:  # might be called after a retry; avoid dup
+                continue
+            p = subtractor_primes[idx]
+            if p * 2 > n:
+                break
+            # wheel filter (subtractor side)
+            if use_wheel:
+                ok = True
+                for r, nr in n_mod.items():
+                    if res_cache[r][idx] == nr:
+                        ok = False; break
+                if not ok:
+                    tried.add(idx)
+                    continue
+            q = n - p
+            # pre-sieve
+            if sieve_order:
+                passes, killer = q_pre_sieve(q, sieve_order)
+                if killer is not None:
+                    # credit trials up to killer (inclusive)
+                    for rp in sieve_order:
+                        gi = gstate["order"].index(rp)
+                        gstate["trials"][gi] += 1
+                        if rp == killer:
+                            gstate["kills"][gi] += 1
+                            break
+                    checks += 1
+                    tried.add(idx)
+                    if checks >= subs_max_checks:
+                        return False, checks
+                    continue
+                else:
+                    for rp in sieve_order:
+                        gi = gstate["order"].index(rp)
+                        gstate["trials"][gi] += 1
+            # BPSW
+            checks += 1
+            tried.add(idx)
+            if is_probable_prime(q):
+                return True, checks
+            if checks >= subs_max_checks:
+                return False, checks
+        return False, checks
 
     # --------------------------- Per-digit or sweep -----------------------
 
@@ -412,7 +473,7 @@ def main() -> None:
         for _ in range(trials):
             n = random_even_with_digits(D, rng)
 
-            # ----- Per-n choices (made once; zero hot-loop cost) -----
+            # Per-n choices (once; zero hot-loop cost)
             sig = signature_of_n(n, wheel_list, extra_bits=args.sig_extra_bits)
             sb = get_sig_stats(sig, k_opts, L_opts)
 
@@ -422,17 +483,47 @@ def main() -> None:
             use_wheel = k > 0
             n_mod = build_wheel_residues_for_n(n, wheel_list[:k]) if use_wheel else {}
 
-            # snapshot the first L primes from global learned order
             g = cache["global_sieve"]
             sieve_order = g["order"][:L]
 
-            visited_band_trials: Dict[int, int] = {}
+            tried: Set[int] = set()
             checks_total = 0
             found = False
-            hit_band = None
             t0 = time.perf_counter()
 
             if n % 2 == 0 and n >= 4:
+                # ---- Small-subtractors pre-pass
+                if args.small_subs_first > 0 or args.small_subs_ceiling > 0:
+                    f, c = small_subs_scan(n, tried, n_mod, use_wheel, sieve_order, g, args.subs_max_checks)
+                    checks_total += c
+                    if f:
+                        elapsed_ms = (time.perf_counter() - t0) * 1000.0
+                        # update per-n bandits
+                        ki = k_opts.index(k)
+                        sb["k_trials"][ki] += 1
+                        sb["k_ms_sum"][ki] += elapsed_ms
+                        sb["k_checks_sum"][ki] += checks_total
+                        Li = L_opts.index(L)
+                        sb["L_trials"][Li] += 1
+                        sb["L_ms_sum"][Li] += elapsed_ms
+                        sb["L_checks_sum"][Li] += checks_total
+                        # maybe reorder global sieve by utility periodically
+                        if sum(g["trials"]) % 256 == 0 and sum(g["trials"]) > 0:
+                            util = [(g["kills"][i] / (g["trials"][i] + 1.0), i) for i in range(len(g["order"]))]
+                            util.sort(key=lambda x: -x[0])
+                            new_order = [g["order"][i] for _,i in util]
+                            g["order"] = new_order
+                            g["trials"] = [g["trials"][i] for _,i in util]
+                            g["kills"]  = [g["kills"][i]  for _,i in util]
+                        hits += 1
+                        checks_on_hits.append(checks_total)
+                        ms_on_hits.append(elapsed_ms)
+                        save_cache(args.cache_file, cache)
+                        continue  # next n
+
+                # ---- Main learned band-ordered search (skips tried indices)
+                visited_band_trials: Dict[int, int] = {}
+                hit_band = None
                 for b in band_order:
                     start = b * band_size
                     end   = min(start + band_size, total_items)
@@ -440,35 +531,32 @@ def main() -> None:
                     band_checks = 0
                     broke_mid = False
                     for idx in range(start, end):
+                        if idx in tried:
+                            continue
                         p = subtractor_primes[idx]
                         if p * 2 > n:
                             broke_mid = True
                             break
-                        # Wheel prefilter (subtractor side)
                         if use_wheel:
-                            wheel_ok = True
+                            ok = True
                             for r, nr in n_mod.items():
                                 if res_cache[r][idx] == nr:
-                                    wheel_ok = False; break
-                            if not wheel_ok:
+                                    ok = False; break
+                            if not ok:
+                                tried.add(idx)
                                 continue
-
                         q = n - p
-                        # Pre-sieve using current learned order (first L primes)
                         if L > 0:
                             passes, killer = q_pre_sieve(q, sieve_order)
-                            # update global sieve stats for primes we actually touched:
-                            # we approximate by crediting 1 trial to each tested prime up to the killer (or all L if passes)
                             if killer is not None:
-                                # trials credited to primes up to and incl. killer
-                                for i, rp in enumerate(sieve_order):
+                                for rp in sieve_order:
                                     gi = g["order"].index(rp)
                                     g["trials"][gi] += 1
                                     if rp == killer:
                                         g["kills"][gi] += 1
                                         break
-                                # pre-sieve failed; no BPSW; count a check and continue
                                 band_checks += 1
+                                tried.add(idx)
                                 if checks_total + band_checks >= args.subs_max_checks:
                                     visited_band_trials[b] = visited_band_trials.get(b, 0) + band_checks
                                     checks_total += band_checks
@@ -477,13 +565,11 @@ def main() -> None:
                                     break
                                 continue
                             else:
-                                # passed: all L primes were tested
                                 for rp in sieve_order:
                                     gi = g["order"].index(rp)
                                     g["trials"][gi] += 1
-
-                        # BPSW
                         band_checks += 1
+                        tried.add(idx)
                         if is_probable_prime(q):
                             visited_band_trials[b] = visited_band_trials.get(b, 0) + band_checks
                             checks_total += band_checks
@@ -496,11 +582,8 @@ def main() -> None:
                             record_band_updates(digit_entry, visited_band_trials, None)
                             found = False; hit_band = None
                             break
-
-                    # band finished or broke
                     if found or checks_total >= args.subs_max_checks or (broke_mid and start < end):
                         if not found and broke_mid:
-                            # if we broke on midpoint, still record the partial band checks
                             if band_checks:
                                 visited_band_trials[b] = visited_band_trials.get(b, 0) + band_checks
                                 checks_total += band_checks
@@ -520,23 +603,20 @@ def main() -> None:
             sb["L_ms_sum"][Li] += elapsed_ms
             sb["L_checks_sum"][Li] += checks_total
 
-            # Periodically refresh global sieve order by utility = kills / (trials+1)
-            # (very cheap; keeps front of the list useful)
-            # Note: we do not change 'order' length here; only reorder within tracked window
+            # Periodically refresh global sieve order by utility
             if sum(g["trials"]) % 256 == 0 and sum(g["trials"]) > 0:
                 util = [(g["kills"][i] / (g["trials"][i] + 1.0), i) for i in range(len(g["order"]))]
                 util.sort(key=lambda x: -x[0])
                 new_order = [g["order"][i] for _,i in util]
-                new_trials = [g["trials"][i] for _,i in util]
-                new_kills  = [g["kills"][i]  for _,i in util]
-                g["order"], g["trials"], g["kills"] = new_order, new_trials, new_kills
+                g["order"] = new_order
+                g["trials"] = [g["trials"][i] for _,i in util]
+                g["kills"]  = [g["kills"][i]  for _,i in util]
 
             if found:
                 hits += 1
                 checks_on_hits.append(checks_total)
                 ms_on_hits.append(elapsed_ms)
 
-        # persist cache updates for this D
         save_cache(args.cache_file, cache)
         return hits, trials, checks_on_hits, ms_on_hits
 
@@ -545,10 +625,14 @@ def main() -> None:
         digits_space = args.sweep
         rows: List[Dict[str, object]] = []
         if not args.quiet:
-            print("\n# Learned subtractor-only sweep (per-n adaptive)")
+            print("\n# Learned subtractor-only sweep (per-n adaptive + small-sub pre-pass)")
             print(f"# subs_ceiling={args.subs_ceiling} | subs_max_checks={args.subs_max_checks}")
             print(f"# wheel={wheel_list} | pre_sieve_limit={args.pre_sieve_limit} | band_size={args.band_size} | cache={args.cache_file} | decay={args.decay} | smoothing={args.smoothing}")
-            print(f"# samples per digit={args.samples} | seed={args.seed}\n")
+            print(f"# samples per digit={args.samples} | seed={args.seed}")
+            if args.small_subs_ceiling > 0:
+                print(f"# small_subs: p<= {args.small_subs_ceiling}")
+            else:
+                print(f"# small_subs: first {args.small_subs_first}\n")
 
         for D in digits_space:
             hits, total, checks_on_hits, ms_on_hits = run_for_digits(D, args.samples)
@@ -585,6 +669,8 @@ def main() -> None:
                 "decay": args.decay,
                 "smoothing": args.smoothing,
                 "seed": args.seed,
+                "small_subs_first": args.small_subs_first,
+                "small_subs_ceiling": args.small_subs_ceiling,
             }
             if args.ci and show_hit:
                 row["hit_rate_ci95_low"] = round(lo95, 6)
@@ -606,6 +692,10 @@ def main() -> None:
     print(f"# Goldbach | D={D} | count={args.count} | seed={args.seed}")
     print(f"# subs_ceiling={args.subs_ceiling} | subs_max_checks={args.subs_max_checks} "
           f"| wheel={wheel_list} | pre_sieve_limit={args.pre_sieve_limit} | band_size={args.band_size} | cache={args.cache_file}")
+    if args.small_subs_ceiling > 0:
+        print(f"# small_subs: p<= {args.small_subs_ceiling}")
+    else:
+        print(f"# small_subs: first {args.small_subs_first}")
     hits, total, checks_on_hits, ms_on_hits = run_for_digits(D, args.count)
     rate = hits/total if total else 0.0
     avg_checks = (sum(checks_on_hits)/len(checks_on_hits)) if checks_on_hits else None
