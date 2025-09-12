@@ -394,21 +394,17 @@ def main() -> None:
         if hit_band is not None:
             entry["successes"][hit_band] += 1
 
-    # --------------- Small-subtractors pre-pass (new) ----------------
+    # --------------- Small-subtractors pre-pass (fixed) ----------------
 
     def small_subs_indices() -> List[int]:
-        if args.small-subs-ceiling is not None:  # placeholder to avoid lint
-            pass
         if args.small_subs_ceiling > 0:
-            # all primes p <= ceiling
             cut = args.small_subs_ceiling
             return [i for i,p in enumerate(subtractor_primes) if p <= cut]
-        # otherwise first N primes
         N = max(0, min(args.small_subs_first, len(subtractor_primes)))
         return list(range(N))
 
     def small_subs_scan(n: int, tried: Set[int], n_mod: Dict[int,int], use_wheel: bool,
-                        sieve_order: List[int], gstate: Dict[str, Any],
+                        sieve_order: List[int], gi_map: Dict[int,int],
                         subs_max_checks: int) -> Tuple[bool,int]:
         """
         Try a small, fixed set of tiny p first. Updates global sieve stats.
@@ -417,7 +413,7 @@ def main() -> None:
         checks = 0
         order = small_subs_indices()
         for idx in order:
-            if idx in tried:  # might be called after a retry; avoid dup
+            if idx in tried:
                 continue
             p = subtractor_primes[idx]
             if p * 2 > n:
@@ -436,12 +432,11 @@ def main() -> None:
             if sieve_order:
                 passes, killer = q_pre_sieve(q, sieve_order)
                 if killer is not None:
-                    # credit trials up to killer (inclusive)
                     for rp in sieve_order:
-                        gi = gstate["order"].index(rp)
-                        gstate["trials"][gi] += 1
+                        gi = gi_map[rp]
+                        gstate_trials[gi] += 1
                         if rp == killer:
-                            gstate["kills"][gi] += 1
+                            gstate_kills[gi] += 1
                             break
                     checks += 1
                     tried.add(idx)
@@ -450,8 +445,8 @@ def main() -> None:
                     continue
                 else:
                     for rp in sieve_order:
-                        gi = gstate["order"].index(rp)
-                        gstate["trials"][gi] += 1
+                        gi = gi_map[rp]
+                        gstate_trials[gi] += 1
             # BPSW
             checks += 1
             tried.add(idx)
@@ -485,16 +480,23 @@ def main() -> None:
 
             g = cache["global_sieve"]
             sieve_order = g["order"][:L]
+            gi_map_local = {p:i for i,p in enumerate(g["order"])}  # index map for O(1) updates
+
+            # bind global arrays for faster closure access in small_subs_scan
+            nonlocal gstate_trials, gstate_kills  # type: ignore
+            gstate_trials = g["trials"]
+            gstate_kills  = g["kills"]
 
             tried: Set[int] = set()
             checks_total = 0
             found = False
+            hit_band = None
             t0 = time.perf_counter()
 
             if n % 2 == 0 and n >= 4:
                 # ---- Small-subtractors pre-pass
                 if args.small_subs_first > 0 or args.small_subs_ceiling > 0:
-                    f, c = small_subs_scan(n, tried, n_mod, use_wheel, sieve_order, g, args.subs_max_checks)
+                    f, c = small_subs_scan(n, tried, n_mod, use_wheel, sieve_order, gi_map_local, args.subs_max_checks)
                     checks_total += c
                     if f:
                         elapsed_ms = (time.perf_counter() - t0) * 1000.0
@@ -507,12 +509,11 @@ def main() -> None:
                         sb["L_trials"][Li] += 1
                         sb["L_ms_sum"][Li] += elapsed_ms
                         sb["L_checks_sum"][Li] += checks_total
-                        # maybe reorder global sieve by utility periodically
+                        # periodic reorder by utility
                         if sum(g["trials"]) % 256 == 0 and sum(g["trials"]) > 0:
                             util = [(g["kills"][i] / (g["trials"][i] + 1.0), i) for i in range(len(g["order"]))]
                             util.sort(key=lambda x: -x[0])
-                            new_order = [g["order"][i] for _,i in util]
-                            g["order"] = new_order
+                            g["order"]  = [g["order"][i]  for _,i in util]
                             g["trials"] = [g["trials"][i] for _,i in util]
                             g["kills"]  = [g["kills"][i]  for _,i in util]
                         hits += 1
@@ -523,7 +524,6 @@ def main() -> None:
 
                 # ---- Main learned band-ordered search (skips tried indices)
                 visited_band_trials: Dict[int, int] = {}
-                hit_band = None
                 for b in band_order:
                     start = b * band_size
                     end   = min(start + band_size, total_items)
@@ -550,7 +550,7 @@ def main() -> None:
                             passes, killer = q_pre_sieve(q, sieve_order)
                             if killer is not None:
                                 for rp in sieve_order:
-                                    gi = g["order"].index(rp)
+                                    gi = gi_map_local[rp]
                                     g["trials"][gi] += 1
                                     if rp == killer:
                                         g["kills"][gi] += 1
@@ -566,7 +566,7 @@ def main() -> None:
                                 continue
                             else:
                                 for rp in sieve_order:
-                                    gi = g["order"].index(rp)
+                                    gi = gi_map_local[rp]
                                     g["trials"][gi] += 1
                         band_checks += 1
                         tried.add(idx)
@@ -607,8 +607,7 @@ def main() -> None:
             if sum(g["trials"]) % 256 == 0 and sum(g["trials"]) > 0:
                 util = [(g["kills"][i] / (g["trials"][i] + 1.0), i) for i in range(len(g["order"]))]
                 util.sort(key=lambda x: -x[0])
-                new_order = [g["order"][i] for _,i in util]
-                g["order"] = new_order
+                g["order"]  = [g["order"][i]  for _,i in util]
                 g["trials"] = [g["trials"][i] for _,i in util]
                 g["kills"]  = [g["kills"][i]  for _,i in util]
 
