@@ -2,8 +2,8 @@
 # -*- coding: utf-8 -*-
 
 """
-Goldbach sampler with gmpy2 (guaranteed-hit trials, built-in wheel/bitset pre-sieve):
-- First n per digit band is a UNIFORM RANDOM even d-digit number
+Goldbach - Prove the Heuristics are true instead of exhaustively verifying the conjecture:
+- First n per digit band is a UNIFORM RANDOM even d-digit number from the bottom 1% of the band
 - Random increasing even n via percent step (with stochastic rounding)
 - Unbounded subtractor stream: 3,5,7,... generated on demand
 - Three competing racers per n:
@@ -15,8 +15,7 @@ Goldbach sampler with gmpy2 (guaranteed-hit trials, built-in wheel/bitset pre-si
 - Wheel/bitset pre-sieve:
     * p-side: forbid residues p ≡ n (mod r) for r ∈ {3,5,7,11,13}, combined via W=15015
     * q-side: only allow residues coprime to W (skip q divisible by wheel primes)
-- Per-digit summaries by default; --quiet hides the representative p+q=n
-- Representative decomposition picked by weighted-random (avoids “ugly” round/edge cases)
+- If any trial fails to find a decomposition, program prints "I was wrong" and exits immediately.
 
 Usage examples:
   python gb.py --digits 480:500 --percent 0.5:1.2 --seed 2 --count 5
@@ -24,6 +23,7 @@ Usage examples:
 """
 
 import argparse
+import math
 import random
 import sys
 import time
@@ -177,7 +177,6 @@ class GoldbachSampler:
         self.W = W
 
         # q-side: residues allowed iff coprime to W (i.e., not 0 mod any wheel prime)
-        # Build once; tiny cost.
         allowed = bytearray(1 for _ in range(self.W))
         for r in self.wheel_primes:
             for t in range(0, self.W, r):
@@ -209,12 +208,25 @@ class GoldbachSampler:
             p = gmpy2.next_prime(p)
             self.trial_prs.append(int(p))
 
-    # ---- random even starter ----
+    # ---- random even starter (bottom 1% of the band) ----
     def _random_even_with_digits(self, d: int) -> int:
         lo = first_even_with_digits(d)
         hi = max_even_with_digits(d)
-        count = ((hi - lo) // 2) + 1
-        offset = self.rng.randrange(count)  # uniform in 0..count-1
+        span = hi - lo
+        if span <= 0:
+            return lo
+        # cap defines the top of the 1% window; ensure even
+        window = max(2, (span // 100))  # at least width 2 so we have ≥1 even step
+        hi_cap = lo + window
+        if (hi_cap & 1) != 0:
+            hi_cap -= 1
+            if hi_cap <= lo:
+                hi_cap = lo
+        # count even numbers in [lo, hi_cap]
+        count = ((hi_cap - lo) // 2) + 1
+        if count <= 1:
+            return lo
+        offset = self.rng.randrange(count)  # uniform 0..count-1
         return lo + 2 * offset
 
     # ---- step sizing (big-int safe + stochastic rounding) ----
@@ -276,7 +288,7 @@ class GoldbachSampler:
     # ---- index streams ----
     @staticmethod
     def _centered_indices_infinite(k0: int):
-        """Infinite generator: k0, k0-1, k0+1, k0-2, k0+2, ... (positive indices only)."""
+        """Small Prime Generator"""
         if k0 < 1:
             k0 = 1
         yield k0
@@ -291,7 +303,7 @@ class GoldbachSampler:
 
     @staticmethod
     def _mid_q_candidates(n: int):
-        """Infinite generator of odd q around n//2: ..., -3, -1, +1, +3, ..."""
+        """Generate odds around n/2"""
         mid = n // 2
         if (mid & 1) == 0:
             left = mid - 1
@@ -308,7 +320,6 @@ class GoldbachSampler:
 
     # ---- build p-side forbidden residue bitset for this n ----
     def _build_p_forbidden(self, n: int) -> bytearray:
-        """bytearray of length W; entry=1 if residue class is forbidden for p."""
         mask = bytearray(0 for _ in range(self.W))
         for r in self.wheel_primes:
             a = int(n % r)  # BigInt mod small int is fast
@@ -328,7 +339,7 @@ class GoldbachSampler:
         allowed_q_mask = self.allowed_q_mask
 
         tried_p_global = set()     # indices used by seq/around (avoid duplicate p)
-        tried_q_mid = set()        # q residues tried (for bookkeeping; not strictly needed)
+        tried_q_mid = set()        # q residues tried (bookkeeping)
         seq_next = 1
         around_iter = self._centered_indices_infinite(k0_guess)
         mid_iter = self._mid_q_candidates(n)
@@ -402,7 +413,6 @@ class GoldbachSampler:
                     if mid_pending_q is not None:
                         q = mid_pending_q
                         p = n - q
-                        # p-side wheel mask isn't needed here; we already know q is prime-ish
                         if p >= 2 and ((p & 1) == 1 or p == 2):
                             tried += 1  # we will actually test p now
                             is_prime, did_bpsw = self._is_probable_prime(p, bpsw_counter)
@@ -426,7 +436,6 @@ class GoldbachSampler:
                     # Wheel mask on q-side: skip residues divisible by wheel primes
                     if not allowed_q_mask[q_candidate % W]:
                         continue
-                    # Optional: avoid exact repeats for bookkeeping
                     if q_candidate in tried_q_mid:
                         continue
                     tried_q_mid.add(q_candidate)
@@ -456,7 +465,7 @@ class GoldbachSampler:
     def run_for_digits(self, d: int, count_limit: int):
         lo = first_even_with_digits(d)
         hi = max_even_with_digits(d)
-        n = self._random_even_with_digits(d)  # uniform random even d-digit start
+        n = self._random_even_with_digits(d)  # uniform random even d-digit start (bottom 1%)
         produced = 0
         while produced < count_limit and n <= hi:
             yield n
@@ -541,7 +550,7 @@ def main(argv=None):
     parser.add_argument("--count", type=int, default=100,
                         help="Number of samples per digit length (default: 100).")
     parser.add_argument("--percent", default="1:2",
-        help="Random step size as a percent range of current n (e.g., 1:2 = 1%%..2%%, default).")
+                        help="Random step size as a percent range of current n (e.g., 1:2 = 1%%..2%%, default).")
     parser.add_argument("--seed", type=int, default=None,
                         help="RNG seed for reproducibility (optional).")
     parser.add_argument("--quiet", action="store_true",
@@ -570,71 +579,72 @@ def main(argv=None):
     sampler = GoldbachSampler(cfg)
     print_config(cfg)
 
-    # ── NEW: cross-digit warm start state ────────────────────────────────────
-    prev_avg_k: float | None = None
-    prev_d: int | None = None
+    last_digit_successes = []
+    last_digit_value = None
 
-    # For the final quiet footer
-    last_digit_successes: list[tuple[int, int, int]] = []
-    last_digit: int | None = None
-    # ─────────────────────────────────────────────────────────────────────────
+    # cross-digit warm start for K:
+    prev_avg_k = None
+    prev_digit = None
+    ln10 = math.log(10.0)
 
     for d in range(cfg.digits_lo, cfg.digits_hi + 1):
-        t0_digit = time.perf_counter()
-
+        digit_wall_start = time.perf_counter()
         total_ms = 0.0
         total_subs = 0
         total_trials = 0
 
         wins = {'seq': 0, 'around': 0, 'mid': 0}
 
-        # Warm-start avg_k_so_far from previous band: K ~ log n ~ d ⇒ scale by d/prev_d
-        if prev_avg_k is not None and prev_d:
-            avg_k_so_far = max(1.0, prev_avg_k * (d / prev_d))
+        # initialize avg_k_so_far for this digit, using cross-digit prediction if available
+        if prev_avg_k is not None and prev_digit is not None:
+            ln_prev = (prev_digit - 0.5) * ln10
+            ln_curr = (d - 0.5) * ln10
+            scale = ln_curr / ln_prev if ln_prev > 0 else 1.0
+            avg_k_so_far = max(1.0, prev_avg_k * scale)
         else:
-            avg_k_so_far = 64.0  # first band fallback
+            avg_k_so_far = 64.0  # default bootstrap
 
-        successes: list[tuple[int, int, int]] = []
+        successes = []
         sampler.window.clear()
 
-        for n in sampler.run_for_digits(d, cfg.count_per_digits):
-            met = sampler._test_one_n_triple_duel(n, int(round(avg_k_so_far)), wins)
+        try:
+            for n in sampler.run_for_digits(d, cfg.count_per_digits):
+                met = sampler._test_one_n_triple_duel(n, int(round(avg_k_so_far)), wins)
+                # If, against expectations, a trial returns unsuccessfully, abort loudly.
+                if not met.success:
+                    print("I was wrong")
+                    return 1
 
-            total_trials += 1
-            total_ms += met.ms_elapsed
-            total_subs += met.subs_tried
+                total_trials += 1
+                total_ms += met.ms_elapsed
+                total_subs += met.subs_tried
 
-            if met.method_winner in wins:
-                wins[met.method_winner] += 1
+                if met.method_winner in wins:
+                    wins[met.method_winner] += 1
 
-            successes.append((met.p, met.q, met.n))
+                successes.append((met.p, met.q, met.n))
 
-            # update running average attempts K (already post-pre-sieve)
-            avg_k_so_far = (avg_k_so_far * (total_trials - 1) + met.subs_tried) / total_trials
+                # update running average attempts K (already post-pre-sieve)
+                avg_k_so_far = (avg_k_so_far * (total_trials - 1) + met.subs_tried) / total_trials
 
-            # keep autotune happy (bpsw count stored but not printed)
-            sampler.autotune_after_trial(met.subs_tried, met.bpsw_checks, met.ms_elapsed)
+                # keep autotune happy (bpsw count stored but not printed)
+                sampler.autotune_after_trial(met.subs_tried, met.bpsw_checks, met.ms_elapsed)
 
-        wall_ms = (time.perf_counter() - t0_digit) * 1000.0
+        except Exception:
+            # Any failure to produce a decomposition for a generated n ⇒ "I was wrong"
+            print("I was wrong")
+            return 1
+
+        digit_total_ms = (time.perf_counter() - digit_wall_start) * 1000.0
 
         if total_trials == 0:
-            print(f"Digits: {d} / Total Time (Ms): {wall_ms:.3f} / "
-                  f"Avg. Time per trial (ms): 0.000 / Avg. K until hit: 0.000")
+            print(f"Digits: {d} / Total Time (ms): 0.000 / Avg. Time per trial (ms): 0.000 / Avg. K until hit: 0.000")
             continue
 
         avg_ms = total_ms / total_trials
         avg_k = total_subs / total_trials
 
-        # Remember for next digit’s warm start
-        prev_avg_k = avg_k
-        prev_d = d
-
-        # Keep for quiet footer
-        last_digit_successes = successes
-        last_digit = d
-
-        # Compose summary line (with optional representative decomposition)
-        line = (f"Digits: {d} / Total Time (Ms): {wall_ms:.3f} / "
+        line = (f"Digits: {d} / Total Time (Ms): {digit_total_ms:.3f} / "
                 f"Avg. Time per trial (ms): {avg_ms:.3f} / "
                 f"Avg. K until hit: {avg_k:.3f}")
         if not cfg.quiet and successes:
@@ -644,10 +654,18 @@ def main(argv=None):
                 line += f" / {p} + {q} = {n}"
         print(line)
 
-    # ── NEW: when --quiet, show one random sample decomposition from LAST digit ─
+        # remember for cross-digit warm start and final quiet sample
+        prev_avg_k = avg_k
+        prev_digit = d
+        last_digit_successes = successes
+        last_digit_value = d
+
+    # When --quiet, show one sample from the final digit’s trials at the very end
     if cfg.quiet and last_digit_successes:
-        p, q, n = sampler.rng.choice(last_digit_successes)
-        print(f"\nSample (last digit {last_digit}): {p} + {q} = {n}")
+        rep = choose_representative(last_digit_successes, sampler.rng, last_digit_value)
+        if rep is not None:
+            p, q, n = rep
+            print(f"Sample (Digits {last_digit_value}): {p} + {q} = {n}")
 
     return 0
 
