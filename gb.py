@@ -541,7 +541,7 @@ def main(argv=None):
     parser.add_argument("--count", type=int, default=100,
                         help="Number of samples per digit length (default: 100).")
     parser.add_argument("--percent", default="1:2",
-                        help="Random step size as a percent range of current n (e.g., 1:2 = 1%%..2%%, default).")
+        help="Random step size as a percent range of current n (e.g., 1:2 = 1%%..2%%, default).")
     parser.add_argument("--seed", type=int, default=None,
                         help="RNG seed for reproducibility (optional).")
     parser.add_argument("--quiet", action="store_true",
@@ -570,14 +570,31 @@ def main(argv=None):
     sampler = GoldbachSampler(cfg)
     print_config(cfg)
 
+    # ── NEW: cross-digit warm start state ────────────────────────────────────
+    prev_avg_k: float | None = None
+    prev_d: int | None = None
+
+    # For the final quiet footer
+    last_digit_successes: list[tuple[int, int, int]] = []
+    last_digit: int | None = None
+    # ─────────────────────────────────────────────────────────────────────────
+
     for d in range(cfg.digits_lo, cfg.digits_hi + 1):
+        t0_digit = time.perf_counter()
+
         total_ms = 0.0
         total_subs = 0
         total_trials = 0
 
         wins = {'seq': 0, 'around': 0, 'mid': 0}
-        avg_k_so_far = 64.0  # reasonable starting guess; updates from data
-        successes = []
+
+        # Warm-start avg_k_so_far from previous band: K ~ log n ~ d ⇒ scale by d/prev_d
+        if prev_avg_k is not None and prev_d:
+            avg_k_so_far = max(1.0, prev_avg_k * (d / prev_d))
+        else:
+            avg_k_so_far = 64.0  # first band fallback
+
+        successes: list[tuple[int, int, int]] = []
         sampler.window.clear()
 
         for n in sampler.run_for_digits(d, cfg.count_per_digits):
@@ -598,14 +615,27 @@ def main(argv=None):
             # keep autotune happy (bpsw count stored but not printed)
             sampler.autotune_after_trial(met.subs_tried, met.bpsw_checks, met.ms_elapsed)
 
+        wall_ms = (time.perf_counter() - t0_digit) * 1000.0
+
         if total_trials == 0:
-            print(f"Digits: {d} / Avg. Time per trial (ms): 0.000 / Avg. K until hit: 0.000")
+            print(f"Digits: {d} / Total Time (Ms): {wall_ms:.3f} / "
+                  f"Avg. Time per trial (ms): 0.000 / Avg. K until hit: 0.000")
             continue
 
         avg_ms = total_ms / total_trials
         avg_k = total_subs / total_trials
 
-        line = (f"Digits: {d} / Avg. Time per trial (ms): {avg_ms:.3f} / "
+        # Remember for next digit’s warm start
+        prev_avg_k = avg_k
+        prev_d = d
+
+        # Keep for quiet footer
+        last_digit_successes = successes
+        last_digit = d
+
+        # Compose summary line (with optional representative decomposition)
+        line = (f"Digits: {d} / Total Time (Ms): {wall_ms:.3f} / "
+                f"Avg. Time per trial (ms): {avg_ms:.3f} / "
                 f"Avg. K until hit: {avg_k:.3f}")
         if not cfg.quiet and successes:
             rep = choose_representative(successes, sampler.rng, d)
@@ -613,6 +643,11 @@ def main(argv=None):
                 p, q, n = rep
                 line += f" / {p} + {q} = {n}"
         print(line)
+
+    # ── NEW: when --quiet, show one random sample decomposition from LAST digit ─
+    if cfg.quiet and last_digit_successes:
+        p, q, n = sampler.rng.choice(last_digit_successes)
+        print(f"\nSample (last digit {last_digit}): {p} + {q} = {n}")
 
     return 0
 
