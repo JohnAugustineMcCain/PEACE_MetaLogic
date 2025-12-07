@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 from __future__ import annotations
-import argparse, os, random, sys, time, threading, queue
+import argparse, os, random, sys, time
 from dataclasses import dataclass
-from typing import List, Dict
+from typing import Dict, List
 from concurrent.futures import ProcessPoolExecutor
 
 try:
@@ -10,6 +10,9 @@ try:
     GMPY2 = True
 except Exception:
     GMPY2 = False
+
+# In-memory learning: digit length → estimated attempts needed
+LEARNING_DB: Dict[int, float] = {}
 
 MR_BASES = (2,3,5,7,11,13,17,19,23,29)
 def is_probable_prime(n: int) -> bool:
@@ -37,8 +40,6 @@ def next_prime(n: int) -> int:
         if is_probable_prime(n): return n
         n += 2
 
-LEARNING_DB: Dict[int, float] = {}
-
 def goldbach_decompose(n: int, digits: int) -> tuple[int, int, int]:
     attempts = 0
     start_q = 3
@@ -63,77 +64,20 @@ def rand_even_with_digits(d: int, rng: random.Random) -> int:
     return n
 
 @dataclass
-class DigitJob: digits: int; count: int; seed: int
+class Job:
+    digits: int
+    count: int
+    seed: int
 
-def run_digit_worker(job: DigitJob, echo_each: bool, progress_every: int, q) -> None:
+def worker(job: Job) -> tuple[int, float, float]:
     rng = random.Random(job.seed)
     total_ms = total_attempts = 0.0
-    last_p = last_q = last_n = 0
-    for i in range(1, job.count + 1):
+    for _ in range(job.count):
         n = rand_even_with_digits(job.digits, rng)
         t0 = time.perf_counter()
-        p, q, attempts = goldbach_decompose(n, job.digits)
-        dt = (time.perf_counter() - t0) * 1000
-        total_ms += dt
+        _, _, attempts = goldbach_decompose(n, job.digits)
+        total_ms += (time.perf_counter() - t0) * 1000
         total_attempts += attempts
-        last_p, last_q, last_n = p, q, n
-        if echo_each:
-            q.put(("trial", job.digits, attempts, dt))
-        elif progress_every and i % progress_every == 0:
-            q.put(("tick", job.digits, i, job.count))
-    avg_ms = total_ms / job.count
-    avg_attempts = total_attempts / job.count
-    q.put(("done", job.digits, avg_ms, avg_attempts, last_p, last_q, last_n))
-
-def parse_sweep(s: str) -> List[int]:
-    a, b, step = map(int, s.split(":"))
-    return list(range(a, b + 1, step)) if step > 0 else list(range(a, b - 1, step))
+    return job.digits, total_ms / job.count, total_attempts / job.count
 
 def main() -> int:
-    p = argparse.ArgumentParser()
-    p.add_argument("--sweep", required=True)
-    p.add_argument("--count", type=int, default=1000)
-    p.add_argument("--workers", type=int)
-    p.add_argument("--seed", type=int)
-    p.add_argument("--quiet", action="store_true")
-    p.add_argument("--echo-each", action="store_true")
-    p.add_argument("--progress-every", type=int, default=100)
-    args = p.parse_args()
-
-    digits = parse_sweep(args.sweep)
-    seed = args.seed if args.seed is not None else random.randrange(1 << 60)
-    jobs = [DigitJob(d, args.count, seed ^ (d << 13)) for d in digits]
-    workers = min(len(digits), args.workers or os.cpu_count() or 1)
-    echo_each = args.echo_each and not args.quiet
-    prog = 0 if echo_each or args.quiet else args.progress_every
-
-    q = queue.Queue()
-    stop = threading.Event()
-
-    def printer():
-        if not args.quiet:
-            print("digits │ ms/trial │ avg attempts")
-        while not stop.is_set():
-            try:
-                msg = q.get(timeout=0.1)
-            except queue.Empty:
-                continue
-            if msg[0] == "tick" and not args.quiet:
-                print(f"[d={msg[1]:4d}] {msg[2]}/{msg[3]}", flush=True)
-            elif msg[0] == "done" and not args.quiet:
-                print(f"[d={msg[1]:4d}] {msg[2]:7.2f}  {msg[3]:8.2f}", flush=True)
-
-    threading.Thread(target=printer, daemon=True).start()
-
-    t0 = time.time()
-    with ProcessPoolExecutor(max_workers=workers) as exe:
-        futures = [exe.submit(run_digit_worker, job, echo_each, prog, q) for job in jobs]
-        for f in futures:
-            f.result()
-    stop.set()
-
-    print(f"\nDone. Sweep: {digits[0]}–{digits[-1]} digits, {args.count} samples each, {time.time()-t0:.1f}s")
-    return 0
-
-if __name__ == "__main__":
-    sys.exit(main())
