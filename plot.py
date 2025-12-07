@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# goldbach_unlucky_hunter_final.py — Full multiple decompositions + unlucky focus
+# goldbach_unlucky_hunter_final.py — Multiple decompositions + real unlucky numbers
 from __future__ import annotations
 import argparse, random, sys, time, math
 import matplotlib.pyplot as plt
@@ -12,6 +12,7 @@ try:
 except Exception:
     GMPY2 = False
 
+# Your exact honest primality
 MR_BASES = (2,3,5,7,11,13,17,19,23,29)
 def is_probable_prime(n: int) -> bool:
     if n < 2: return False
@@ -38,7 +39,7 @@ def next_prime(n: int) -> int:
         if is_probable_prime(n): return n
         n += 2
 
-# Fast probabilistic prime generation for unlucky candidates
+# Fast random prime generation — works at any digit length
 def random_prime(digits: int, rng: random.Random) -> int:
     lo = 10**(digits - 1)
     hi = 10**digits - 1
@@ -51,7 +52,7 @@ def random_prime(digits: int, rng: random.Random) -> int:
 def unlucky_candidate(digits: int, rng: random.Random) -> int:
     p = random_prime(digits, rng)
     n = 2 * p
-    while len(str(n)) > digits + 1:  # rare overflow
+    while len(str(n)) > digits + 1:
         p = random_prime(digits, rng)
         n = 2 * p
     return n
@@ -88,8 +89,8 @@ def analyze_number(n: int, max_attempts: int = 100_000) -> tuple[int, int]:
         q = next_prime(q)
     return attempts_to_first or attempts, partitions
 
-def worker(job) -> GoldbachStats:
-    d, count, seed, unlucky_ratio = job
+def worker(job):
+    digits, count, seed, unlucky_ratio = job
     rng = random.Random(seed)
     unlucky_count = int(count * unlucky_ratio)
     normal_count = count - unlucky_count
@@ -98,21 +99,21 @@ def worker(job) -> GoldbachStats:
     worst = 0
 
     for _ in range(normal_count):
-        n = rand_even_digits(d, rng)
+        n = rand_even_digits(digits, rng)
         first, parts = analyze_number(n)
         total_first += first
         total_parts += parts
         worst = max(worst, first)
 
     for _ in range(unlucky_count):
-        n = unlucky_candidate(d, rng)
-       re        first, parts = analyze_number(n)
+        n = unlucky_candidate(digits, rng)
+        first, parts = analyze_number(n)
         total_first += first
         total_parts += parts
         worst = max(worst, first)
 
     return GoldbachStats(
-        digits=d,
+        digits=digits,
         attempts_to_first=total_first / count,
         total_partitions=total_parts / count,
         worst_attempts=worst,
@@ -123,7 +124,7 @@ def main():
     p = argparse.ArgumentParser(description="Goldbach: Multiple decompositions + unlucky focus")
     p.add_argument("--sweep", default="100:3000:200")
     p.add_argument("--count", type=int, default=500)
-    p.add_argument("--unlucky", type=float, default=0.4, help="fraction of 2×large_prime numbers")
+    p.add_argument("--unlucky", type=float, default=0.4, help="fraction of 2x large prime numbers")
     p.add_argument("--workers", type=int)
     args = p.parse_args()
 
@@ -133,7 +134,7 @@ def main():
     workers = min(len(jobs), args.workers or os.cpu_count() or 1)
 
     results = []
-    print(f"digits │ avg first │ avg parts │ worst │ unlucky%")
+    print("digits │ avg first │ avg parts │ worst │ unlucky%")
     with ProcessPoolExecutor(max_workers=workers) as exe:
         for stat in exe.map(worker, jobs):
             print(f"[d={stat.digits:4d}] {stat.attempts_to_first:8.1f}  {stat.total_partitions:7.1f}  {stat.worst_attempts:6d}  {stat.unlucky_fraction*100:5.1f}%")
@@ -149,11 +150,16 @@ def main():
     plt.subplot(2,1,1)
     plt.plot(ds, firsts, 'o-', label="Avg attempts to first", color="red")
     plt.plot(ds, worsts, 's--', label="Worst case (unlucky)", color="darkred")
-    plt.yscale('log'); plt.legend(); plt.title("Goldbach Unlucky Hunter")
+    plt.yscale('log')
+    plt.legend()
+    plt.title("Goldbach Unlucky Hunter — Attempts to First Partition")
     plt.subplot(2,1,2)
-    plt.plot(ds, parts, 'o-', label="Avg partitions found", color="green")
-    plt.yscale('log'); plt.legend(); plt.title("Partition Richness")
-    plt.tight_layout(); plt.show()
+    plt.plot(ds, parts, 'o-', label="Average partitions found", color="green")
+    plt.yscale('log')
+    plt.legend()
+    plt.title("Partition Richness")
+    plt.tight_layout()
+    plt.show()
 
 if __name__ == "__main__":
     main()
