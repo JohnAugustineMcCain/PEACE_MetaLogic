@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse, os, random, sys, time, threading, queue
 from dataclasses import dataclass
 from typing import List, Dict
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import ProcessPoolExecutor
 
 try:
     import gmpy2
@@ -107,17 +107,17 @@ def main() -> int:
     echo_each = args.echo_each and not args.quiet
     prog = 0 if echo_each or args.quiet else args.progress_every
 
-    mgr = __import__("multiprocessing").Manager()
-    q = mgr.Queue()
-    stop = {"stop": False}
+    q = queue.Queue()
+    stop = threading.Event()
 
     def printer():
         if not args.quiet:
             print("digits │ ms/trial │ avg attempts")
-        while not stop["stop"]:
+        while not stop.is_set():
             try:
                 msg = q.get(timeout=0.1)
-            except queue.Empty: continue
+            except queue.Empty:
+                continue
             if msg[0] == "tick" and not args.quiet:
                 print(f"[d={msg[1]:4d}] {msg[2]}/{msg[3]}", flush=True)
             elif msg[0] == "done" and not args.quiet:
@@ -126,10 +126,11 @@ def main() -> int:
     threading.Thread(target=printer, daemon=True).start()
 
     t0 = time.time()
-    with ProcessPoolExecutor(workers) as exe:
-        for job in jobs:
-            exe.submit(run_digit_worker, job, echo_each, prog, q)
-    stop["stop"] = True
+    with ProcessPoolExecutor(max_workers=workers) as exe:
+        futures = [exe.submit(run_digit_worker, job, echo_each, prog, q) for job in jobs]
+        for f in futures:
+            f.result()
+    stop.set()
 
     print(f"\nDone. Sweep: {digits[0]}–{digits[-1]} digits, {args.count} samples each, {time.time()-t0:.1f}s")
     return 0
