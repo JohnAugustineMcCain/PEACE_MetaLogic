@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse, os, random, sys, time
 from dataclasses import dataclass
 from typing import Dict, List
-from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures import ProcessPoolExecutor, as_completed
 
 try:
     import gmpy2
@@ -11,7 +11,6 @@ try:
 except Exception:
     GMPY2 = False
 
-# In-memory learning: digit length → estimated attempts needed
 LEARNING_DB: Dict[int, float] = {}
 
 MR_BASES = (2,3,5,7,11,13,17,19,23,29)
@@ -40,7 +39,7 @@ def next_prime(n: int) -> int:
         if is_probable_prime(n): return n
         n += 2
 
-def goldbach_decompose(n: int, digits: int) -> tuple[int, int, int]:
+def goldbach_decompose(n: int, digits: int) -> int:
     attempts = 0
     start_q = 3
     if digits in LEARNING_DB:
@@ -52,7 +51,7 @@ def goldbach_decompose(n: int, digits: int) -> tuple[int, int, int]:
         if is_probable_prime(p):
             new_avg = (LEARNING_DB.get(digits, attempts) * 0.9) + (attempts * 0.1)
             LEARNING_DB[digits] = new_avg
-            return min(p,q), max(p,q), attempts
+            return attempts
         q = next_prime(q)
     raise RuntimeError("No partition")
 
@@ -63,7 +62,7 @@ def rand_even_with_digits(d: int, rng: random.Random) -> int:
     if n > hi: n -= 2
     return n
 
-@dataclass
+@dataclass(frozen=True)
 class Job:
     digits: int
     count: int
@@ -75,9 +74,32 @@ def worker(job: Job) -> tuple[int, float, float]:
     for _ in range(job.count):
         n = rand_even_with_digits(job.digits, rng)
         t0 = time.perf_counter()
-        _, _, attempts = goldbach_decompose(n, job.digits)
+        attempts = goldbach_decompose(n, job.digits)
         total_ms += (time.perf_counter() - t0) * 1000
         total_attempts += attempts
     return job.digits, total_ms / job.count, total_attempts / job.count
 
 def main() -> int:
+    p = argparse.ArgumentParser()
+    p.add_argument("--sweep", required=True)
+    p.add_argument("--count", type=int, default=1000)
+    p.add_argument("--workers", type=int)
+    p.add_argument("--seed", type=int)
+    args = p.parse_args()
+
+    start, end, step = map(int, args.sweep.split(":"))
+    digits = list(range(start, end + 1, step))
+    seed = args.seed if args.seed is not None else random.randrange(1 << 60)
+    jobs = [Job(d, args.count, seed ^ d) for d in digits]
+    workers = min(len(jobs), args.workers or os.cpu_count() or 1)
+
+    print("digits │ ms/trial │ avg attempts")
+    t0 = time.time()
+    with ProcessPoolExecutor(max_workers=workers) as exe:
+        for d, ms, attempts in exe.map(worker, jobs):
+            print(f"[d={d:4d}] {ms:7.2f}  {attempts:8.2f}")
+    print(f"Done in {time.time()-t0:.1f}s")
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
